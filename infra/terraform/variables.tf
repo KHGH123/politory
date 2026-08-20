@@ -9,7 +9,7 @@ variable "region" {
 
 variable "service_name" {
   type    = string
-  default = "politory-backend"
+  default = "politory"
 }
 
 variable "repository_name" {
