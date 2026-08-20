@@ -22,8 +22,13 @@ frontend/dist/
 infra/terraform/.terraform/
 infra/terraform/*.tfstate*
 infra/terraform/terraform.tfvars
+infra/terraform/tfplan
 
 # 에디터/OS
 .vscode/
 .idea/
 .DS_Store
+
+#claude
+CLAUDE.md
+.CLAUDE.md
