@@ -14,19 +14,21 @@ class Settings(BaseSettings):
     # 공공데이터포털 국회사무처_회의록 정보 API
     DATA_GO_KR_API_KEY: str = ""
 
-    # GCP / Vertex AI / Gemini / ADK
-    GCP_PROJECT_ID: str = ""
-    GCP_REGION: str = "asia-northeast3"
+    # GCP / Vertex AI / Gemini / ADK (변수명은 ADK가 그대로 읽는 이름과 맞춤)
+    GOOGLE_GENAI_USE_VERTEXAI: bool = True
+    GOOGLE_CLOUD_PROJECT: str = ""
+    GOOGLE_CLOUD_LOCATION: str = "global"
     GOOGLE_APPLICATION_CREDENTIALS: str = ""
-    GOOGLE_API_KEY: str = ""
+    MODEL: str = "gemini-3.5-flash"
 
     # 웹 검색 도구 (뉴스 2차 출처용)
     WEB_SEARCH_API_KEY: str = ""
 
     # 저장소
     SQLITE_PATH: str = "./db/uijeonggirok.sqlite3"
-    CHROMA_PERSIST_DIR: str = "./db/chroma"
-    CHROMA_COLLECTION_NAME: str = "speeches"
+
+    # Vertex AI Search (RAG)
+    SEARCH_APP_ID: str = ""
 
     # 백엔드 (콤마로 구분된 origin 목록)
     CORS_ORIGINS: str = "http://localhost:5173"
