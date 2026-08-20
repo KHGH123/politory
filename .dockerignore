@@ -1,0 +1,8 @@
+.venv/
+venv/
+__pycache__/
+.env
+db/chroma/
+*.sqlite3
+frontend/node_modules/
+.git/

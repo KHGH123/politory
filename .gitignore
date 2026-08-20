@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+
+# Env
+.env
+
+# 데이터 / 저장소 (1회성 수집 데이터는 팀 내부 공유, 레포에는 커밋하지 않음)
+db/chroma/
+*.sqlite3
+data/raw/
+data/processed/
+
+# 프론트엔드
+frontend/node_modules/
+frontend/dist/
+
+# Terraform
+infra/terraform/.terraform/
+infra/terraform/*.tfstate*
+infra/terraform/terraform.tfvars
+
+# 에디터/OS
+.vscode/
+.idea/
+.DS_Store

@@ -1,0 +1,5 @@
+project_id            = "YOUR_PROJECT_ID"
+region                = "asia-northeast3"
+repository_name       = "team9"
+repository_owner      = "YOUR_GITHUB_OWNER"
+host_connection_name  = "uijeonggirok-github-connection"
