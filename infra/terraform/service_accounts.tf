@@ -1,11 +1,11 @@
 resource "google_service_account" "cloud_build" {
   project      = var.project_id
-  account_id   = "uijeonggirok-cb"
+  account_id   = "politory-cb"
   display_name = "Cloud Build service account"
 }
 
 resource "google_service_account" "backend_app" {
   project      = var.project_id
-  account_id   = "uijeonggirok-app"
+  account_id   = "politory-app"
   display_name = "Cloud Run backend service account"
 }
