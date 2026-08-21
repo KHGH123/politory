@@ -1,7 +1,6 @@
 """전체 프로젝트가 공유하는 설정. 모든 명령/스크립트는 레포 루트에서 실행한다고 가정한다."""
 from functools import lru_cache
 
-from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -23,10 +22,18 @@ class Settings(BaseSettings):
     MODEL: str = "gemini-3.5-flash"
 
     # 웹 검색 도구 (뉴스 2차 출처용) — NAVER API HUB 뉴스 검색.
-    # .env의 실제 키 이름(X-NCP-APIGW-API-KEY-ID 등)은 파이썬 식별자로 못 써서
-    # validation_alias로 매핑한다.
-    NAVER_CLIENT_ID: str = Field(default="", validation_alias="X-NCP-APIGW-API-KEY-ID")
-    NAVER_CLIENT_SECRET: str = Field(default="", validation_alias="X-NCP-APIGW-API-KEY")
+    # 네이버 공식 문서의 실제 HTTP 헤더명은 X-NCP-APIGW-API-KEY-ID /
+    # X-NCP-APIGW-API-KEY라 원래 validation_alias로 그 이름을 그대로 매핑해
+    # 썼는데, Cloud Run이 하이픈(-)을 포함한 이름의 컨테이너 env를 프로세스에
+    # 주입하지 않는다는 걸 실측으로 확인했다(같은 Secret Manager 값을 하이픈
+    # 없는 이름으로 참조하면 정상 로딩, 하이픈 있는 이름으로는 os.environ에서
+    # 조회 자체가 안 됨 — /debug/env-check로 배포 환경에서 직접 대조). 그
+    # 결과 배포 환경에서 이 두 값이 항상 빈 문자열이 되어 search_news가
+    # 매번 빈 리스트를 반환, "정보 없음" 응답이 반복되는 게 실제 배포
+    # 장애였다. 하이픈 없는 이름으로 통일해 해결 — web_search_tool.py의
+    # headers 딕셔너리에서 여전히 실제 HTTP 헤더명(하이픈 포함)으로 보낸다.
+    NAVER_CLIENT_ID: str = ""
+    NAVER_CLIENT_SECRET: str = ""
     WEB_SEARCH_API_KEY: str = ""
 
     # 저장소
