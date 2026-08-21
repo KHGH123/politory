@@ -16,12 +16,15 @@ from config import settings
 NEWS_SEARCH_URL = "https://naverapihub.apigw.ntruss.com/search/v1/news"
 
 
-def search_news(query: str, display: int = 5) -> list[dict]:
+def search_news(query: str, display: int = 10) -> list[dict]:
     """네이버 뉴스 검색 API로 관련 기사를 찾는다.
 
     Args:
         query: 검색어 (예: 의원 이름, 정책 키워드).
-        display: 반환할 기사 수 (1~100, 기본 5).
+        display: 반환할 기사 수 (1~100, 기본 10). 너무 작으면(예: 5) sort=sim이라도
+            결과 상위가 최신 기사 위주로 쏠리는 경향이 있다 — 검색어가 시사성
+            이슈일 때 total이 수천~수만 건인 경우 5개로는 최근 며칠치만 잡히는
+            걸 실제로 확인해서 늘림.
 
     Returns:
         기사 목록. 각 항목은 {"title", "description", "url", "published_at"}.
@@ -39,7 +42,11 @@ def search_news(query: str, display: int = 5) -> list[dict]:
     params = {
         "query": query,
         "display": display,
-        "sort": "date",
+        # sort="date"(최신순)로 두면 오늘 기사만 계속 잡혀서 과거 발언·정책 변화를
+        # 추적하는 이 서비스 취지(CLAUDE.md F-02: 발언 타임라인)와 안 맞았다
+        # (실제로 "최신 뉴스만 나온다"는 문제로 확인). sim(정확도순)으로 바꿔
+        # 검색어와 관련성 높은 기사를 시점 무관하게 가져오게 한다.
+        "sort": "sim",
     }
 
     try:

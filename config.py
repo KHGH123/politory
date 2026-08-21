@@ -33,6 +33,11 @@ class Settings(BaseSettings):
     SQLITE_PATH: str = "./db/uijeonggirok.sqlite3"
 
     # BigQuery (국회의원 정형 데이터 — 다른 팀원이 적재)
+    # assembly 데이터셋이 실제로 있는 GCP 프로젝트가 GOOGLE_CLOUD_PROJECT(Vertex AI/Gemini용,
+    # proj-aj11-...)와 다르다(proj-aj04-...) — 팀원마다 GCP 프로젝트가 갈린 상태.
+    # BIGQUERY_PROJECT를 비워두면 GOOGLE_CLOUD_PROJECT로 폴백하고, 채워두면 BigQuery
+    # 쿼리에서만 이 값을 쓴다(Vertex AI/Gemini 쪽 프로젝트는 그대로 유지).
+    BIGQUERY_PROJECT: str = ""
     BIGQUERY_DATASET: str = ""
     BIGQUERY_MEMBERS_TABLE: str = "MP"
 
@@ -47,6 +52,10 @@ class Settings(BaseSettings):
     @property
     def cors_origins_list(self) -> list[str]:
         return [origin.strip() for origin in self.CORS_ORIGINS.split(",") if origin.strip()]
+
+    @property
+    def bigquery_project(self) -> str:
+        return self.BIGQUERY_PROJECT or self.GOOGLE_CLOUD_PROJECT
 
 
 @lru_cache

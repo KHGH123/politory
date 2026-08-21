@@ -110,13 +110,32 @@ def _make_url_check_callback(known_urls_key: str, info_key: str, retry_hint_key:
     return _callback
 
 
-def _make_verifier(name: str, info_key: str, retry_hint_key: str) -> Agent:
+def _make_verifier(
+    name: str, info_key: str, retry_hint_key: str, check_own_actions_only: bool = False
+) -> Agent:
     """소스 하나의 결과(info_key)를 검증하는 verifier 에이전트를 만든다.
 
     통과 시 exit_loop()을 호출해 LoopAgent를 즉시 종료한다.
     불통과 시 retry_hint_key에 재검색 지시를 남기고 그냥 끝낸다
     (도구 호출을 안 하므로 LoopAgent가 다음 iteration으로 넘어간다).
+
+    check_own_actions_only=True(context_verifier 전용): context_agent
+    instruction에 "본인 발언/행동만 채택, 순수 평가·비판은 제외"를 넣었지만
+    실제 재현에서 지켜지지 않는 케이스가 있어(여론조사·야당 비판이 여전히
+    섞여 나옴) 여기서 이중으로 검사한다. speech/action은 애초에 "본인의
+    발언/법안"만 다루는 게 목적이라 이 문제가 해당되지 않는다.
     """
+    own_actions_check = (
+        """
+        4) 본인 발언/행동 검사(context_info 전용): 이 서비스는 대상 인물
+        본인의 입장 변화를 보여주는 게 목적이다. [context_info]에 여론조사
+        결과, 제3자(야당/시민단체/평론가 등)의 평가·비판만 있고 대상 인물
+        본인의 직접 발언·행동 인용이 전혀 없는 섹션이 있다면, 그것도 근거
+        불분명으로 판정한다. retry_hint에 "본인이 직접 한 말·행동이 인용된
+        기사만 남기고, 순수 여론조사·제3자 평가는 제외하라"고 남겨라."""
+        if check_own_actions_only
+        else ""
+    )
     return Agent(
         name=name,
         model=_model,
@@ -127,29 +146,33 @@ def _make_verifier(name: str, info_key: str, retry_hint_key: str) -> Agent:
         [{info_key}]
         {{{info_key}?}}
 
-        이 내용이 실제 도구(국회 API/벡터DB/뉴스 검색) 호출 결과에 근거하는지 판단하라.
-        다음 신호가 보이면 "근거 불분명(hallucination 의심)"으로 판단한다:
-        - 구체적 날짜·회의명·인용문이 있는데 실제 조회를 수행했다는 언급이 없음
-        - "~일 것으로 보입니다", "~했을 가능성이 있습니다" 같은 추측성 표현으로
-          사실을 서술함
-        - "검색하겠습니다", "~를 진행합니다", "다음 키워드로 조회하겠습니다"처럼
-          **앞으로 할 일을 예고만 하고 실제 결과(기사 제목·발언 인용·법안 번호 등
-          구체적 산출물)가 없는 경우** — 이건 도구를 부르지 않고 의도만 서술한
-          전형적인 hallucination 패턴이므로 반드시 불분명으로 판정한다.
-        - "정보가 없습니다/조회 결과가 없습니다"처럼 결과 없음을 명시했거나, 위
-          [{info_key}]가 완전히 비어 있는 경우는 hallucination이 아니라 정상
-          응답이므로 근거 있음으로 판단한다. (이건 "예고만 하고 끝남"과 다르다 —
-          실제로 조회했는데 결과가 없다고 명시적으로 밝힌 경우만 해당된다.)
+        이 내용이 실제 도구(국회 API/벡터DB/뉴스 검색) 호출 결과에 근거하는지
+        판단하고, exit_loop 호출 여부를 결정하라.
 
-        다음은 hallucination 신호가 "아니다" — 근거 있음으로 판단해야 한다:
-        - [{info_key}]에 담긴 날짜·인물·직책 등이 너(검증자) 자신의 학습 시점
-          기준 지식과 달라 보이는 것. 이건 네가 모르는 최신 사실일 뿐이지 소스
-          에이전트가 지어냈다는 뜻이 아니다. "이는 가상 시나리오/미래를 가정한
-          보도로 보인다" 같은 코멘트가 [{info_key}] 안에 있다면, 그 코멘트
-          자체가 소스 에이전트의 잘못된 자의적 판단이니 불분명으로 판정하고
-          retry_hint에 "검색 결과의 사실성을 판단하지 말고 있는 그대로
-          전달하라"고 남겨라. 하지만 [{info_key}]의 사실 서술 자체(구체적
-          기사·발언·법안 인용)를 근거 없음으로 취급하지는 마라.
+        "근거 불분명(hallucination 의심)"으로 판정하는 경우:
+        1) 예고만 하고 결과 없음 — 구체적 날짜·회의명·인용문 없이 "검색하겠습니다",
+        "~를 진행합니다"처럼 앞으로 할 일만 서술하고 실제 산출물(기사 제목·발언
+        인용·법안 번호 등)이 없는 경우. "~일 것으로 보입니다" 같은 추측성 표현으로
+        사실을 서술하는 것도 포함된다.
+        2) 관련성 부족 — 검색은 대상 이름이 "포함된" 결과를 줄 뿐 실제로 그
+        인물/사안을 다룬다는 보장은 없다(예: "홍길동"이 선거법 판례의 가상
+        사례나 전단지 시안 예시명으로만 등장). 이런 무관한 근거를 마치 대상
+        인물의 실제 발언·행보인 것처럼 서술했다면 불분명으로 판정하고
+        retry_hint에 "이름만 일치하는 무관한 결과는 제외하고 실제 검색 대상을
+        다룬 근거만 남기라"고 남겨라.
+        3) 사실성을 자의적으로 의심함 — [{info_key}]에 담긴 날짜·인물·직책이
+        너(검증자) 자신의 학습 시점 지식과 달라 보이는 건 네가 모르는 최신
+        사실일 뿐 hallucination이 아니다. "가상 시나리오로 보인다"류 코멘트가
+        [{info_key}] 안에 있다면 그 코멘트 자체가 소스 에이전트의 잘못이니
+        불분명으로 판정하고 retry_hint에 "검색 결과의 사실성을 판단하지 말고
+        있는 그대로 전달하라"고 남겨라. 단, 사실 서술 자체(구체적 기사·발언·
+        법안 인용)를 근거 없음으로 취급하지는 마라.{own_actions_check}
+
+        "근거 있음"으로 판정하는 경우: 위 4가지 문제가 없는 경우. "정보가
+        없습니다/조회 결과가 없습니다"처럼 실제로 조회했는데 결과가 없다고
+        명시한 경우, 또는 [{info_key}]가 완전히 비어 있는 경우도 hallucination이
+        아니라 정상 응답이므로 근거 있음으로 판단한다(1번의 "예고만 하고 끝남"과
+        다르다 — 실제 조회 여부가 명시된 경우만 해당).
 
         - 근거가 있다고 판단되면: exit_loop 도구를 호출하라. 다른 텍스트는 출력하지 마라.
         - 근거가 불분명하면: exit_loop을 호출하지 말고, 어떤 부분이 불분명한지와
@@ -162,7 +185,9 @@ def _make_verifier(name: str, info_key: str, retry_hint_key: str) -> Agent:
 
 speech_verifier = _make_verifier("speech_verifier", "speech_info", "speech_retry_hint")
 action_verifier = _make_verifier("action_verifier", "action_info", "action_retry_hint")
-context_verifier = _make_verifier("context_verifier", "context_info", "context_retry_hint")
+context_verifier = _make_verifier(
+    "context_verifier", "context_info", "context_retry_hint", check_own_actions_only=True
+)
 
 # context_agent가 search_news를 호출할 때마다 실제 반환 URL을 session state에 기록.
 context_agent.after_tool_callback = _record_search_news_urls

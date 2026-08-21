@@ -7,6 +7,7 @@ speech_agent/action_agent/context_agent 실행 여부를 결정한다.
 import os
 
 from google.adk.agents import Agent
+from google.genai import types
 from pydantic import BaseModel
 
 
@@ -19,6 +20,13 @@ class RouteDecision(BaseModel):
 query_processing = Agent(
     name="query_processing",
     model=os.getenv("MODEL", "gemini-3.5-flash"),
+    # bool 3개만 판단하는 단순 라우팅에 내부 추론(thinking)이 불필요하게
+    # 시간을 잡아먹는 걸 실측으로 확인(콜드스타트 제외 매번 ~7초) — 꺼서
+    # 응답 속도를 줄인다. 다른 서브에이전트(merge/guardrail 등)는 판단이
+    # 더 복잡해서 thinking을 그대로 둔다.
+    generate_content_config=types.GenerateContentConfig(
+        thinking_config=types.ThinkingConfig(thinking_budget=0),
+    ),
     instruction="""
     사용자 질문을 보고 아래 세 정보 소스 중 무엇이 필요한지 true/false로 판단해라.
     - action: 법안/표결/의원 정보 조회가 필요하면 true
