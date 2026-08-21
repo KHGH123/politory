@@ -7,9 +7,8 @@ from pathlib import Path
 
 RAW_DIR = Path("data/raw")
 
-# MVP 스코프: 22대, 특정 상임위 1~2개, 의원 3~5명으로 한정
 TARGET_ASSEMBLY = 22
-TARGET_COMMITTEES = ["국토교통위원회"]
+TARGET_COMMITTEES = [""]
 TARGET_MEMBERS: list[str] = []  # TODO: 데모 대상 의원 3~5명 채워 넣기
 
 
