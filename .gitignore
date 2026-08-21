@@ -21,6 +21,10 @@ frontend/dist/
 infra/terraform/.terraform/
 infra/terraform/*.tfstate*
 infra/terraform/terraform.tfvars
+infra/terraform/tfplan
+
+# ADK 로컬 세션 (adk web 실행 시 생성)
+agent/.adk/
 
 # 에디터/OS
 .vscode/

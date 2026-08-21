@@ -9,7 +9,10 @@ fastapi
 uvicorn[standard]
 
 # --- 에이전트 (agent/) ---
-google-adk==2.7.1
+# [a2a] extra: backend가 agent를 HTTP(A2A 프로토콜)로 호출하는 to_a2a()에 필요
+google-adk[a2a]==2.7.1
+# a2a-sdk의 JSON-RPC 라우트가 lifespan 시점에 임포트하는데 [a2a] extra에 빠져 있어 별도 명시
+sse-starlette
 
 # --- 정형 데이터 (db/) ---
 # sqlite3는 파이썬 표준 라이브러리 포함, 별도 설치 불필요
