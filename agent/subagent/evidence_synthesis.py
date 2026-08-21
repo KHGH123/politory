@@ -42,9 +42,23 @@ import os
 from typing import Literal, Optional
 
 from google.adk.agents import Agent, SequentialAgent
+from google.genai import types
 from pydantic import BaseModel
 
 _model = os.getenv("MODEL", "gemini-3.5-flash")
+
+# 파이프라인 단계별 소요 시간을 실측(agent.run_async 이벤트 타임스탬프)했더니
+# merge 29.6초, guardrail 16.0초로 전체 93.8초 중 절반 가까이를 이 두 단계가
+# 차지했다 — query_processing(라우팅, thinking_budget=0로 이미 최적화)보다도
+# 훨씬 컸다. "판단이 복잡하니 thinking을 켜둔다"던 이전 판단(구 주석)을
+# 재검토해 꺼보고 실측 비교했다: merge 29.6초->10.6초, guardrail 16.0초->10.2초,
+# 전체 93.8초->66.2초(약 30% 단축). 5회 반복(정청래) + 회귀 2건(서범수/맹성규)
+# 모두 각주-sources 정합성, url 없는 항목 제거, excerpt 완결성 그대로 유지되는
+# 것 확인 — merge/guardrail의 "복잡한 판단"은 구조화 출력 스키마를 채우는
+# 종류의 작업이라 thinking이 실제 판단 품질에 크게 기여하지 않았던 것으로 보임.
+_no_thinking_config = types.GenerateContentConfig(
+    thinking_config=types.ThinkingConfig(thinking_budget=0),
+)
 
 
 class Source(BaseModel):
@@ -72,6 +86,7 @@ class AgentResponse(BaseModel):
 merge = Agent(
     name="merge",
     model=_model,
+    generate_content_config=_no_thinking_config,
     instruction="""
     아래 수집된 정보를 종합해 사용자 질문에 답하라.
 
@@ -132,6 +147,7 @@ merge = Agent(
 guardrail = Agent(
     name="guardrail",
     model=_model,
+    generate_content_config=_no_thinking_config,
     instruction="""
     아래는 merge 단계가 만든 초안이다. 두 가지를 검사해 최종 응답을 만들어라:
     (1) answer의 해석적 판단 문장 (2) url 없는 sources 항목과 그걸 인용한 문장.
