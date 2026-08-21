@@ -46,8 +46,16 @@ resource "google_cloud_run_v2_service" "backend" {
       }
 
       # NAVER API HUB 뉴스 검색 인증 — Secret Manager 참조(secrets.tf).
+      # env 이름에 하이픈을 쓰면 안 된다 — 처음엔 네이버 공식 헤더명 그대로
+      # (X-NCP-APIGW-API-KEY-ID 등) 썼는데, Cloud Run이 하이픈 포함 env
+      # 이름을 컨테이너 프로세스에 아예 주입하지 않는다는 걸 실측으로 확인
+      # (같은 시크릿을 하이픈 없는 임시 이름으로 참조하면 정상 로딩됨 —
+      # /debug/env-check로 os.environ 직접 대조). 그 결과 배포 환경에서
+      # NAVER_CLIENT_ID/SECRET이 항상 빈 문자열이 되어 뉴스 검색이 매번
+      # 빈 결과를 반환하고, context_agent가 "정보 없음"만 응답하는 게
+      # 실제 배포 장애였다. config.py도 이 이름 그대로 읽도록 맞춰뒀다.
       env {
-        name = "X-NCP-APIGW-API-KEY-ID"
+        name = "NAVER_CLIENT_ID"
         value_source {
           secret_key_ref {
             secret  = google_secret_manager_secret.naver_client_id.secret_id
@@ -56,7 +64,7 @@ resource "google_cloud_run_v2_service" "backend" {
         }
       }
       env {
-        name = "X-NCP-APIGW-API-KEY"
+        name = "NAVER_CLIENT_SECRET"
         value_source {
           secret_key_ref {
             secret  = google_secret_manager_secret.naver_client_secret.secret_id

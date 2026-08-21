@@ -1,7 +1,11 @@
 """뉴스/보도 검색 툴 (2차 출처). NAVER API HUB 뉴스 검색 API를 호출한다.
 
 인증: config.settings의 NAVER_CLIENT_ID/NAVER_CLIENT_SECRET
-(.env의 X-NCP-APIGW-API-KEY-ID / X-NCP-APIGW-API-KEY 값).
+(.env/Cloud Run env 키 이름도 NAVER_CLIENT_ID/NAVER_CLIENT_SECRET — 실제
+네이버 HTTP 헤더명(X-NCP-APIGW-API-KEY-ID 등)은 아래 headers 딕셔너리를
+만들 때만 쓴다. env 이름 자체에 하이픈을 쓰면 Cloud Run이 컨테이너
+프로세스에 주입하지 않는 문제를 실측으로 확인해 이렇게 분리함 —
+config.py 주석 참고).
 엔드포인트: https://naverapihub.apigw.ntruss.com/search/v1/news
 문서: https://api.ncloud-docs.com/docs/naver-api-hub-search-news
 일 호출 한도 25,000회.
