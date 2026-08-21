@@ -26,3 +26,5 @@ infra/terraform/terraform.tfvars
 .vscode/
 .idea/
 .DS_Store
+
+API.md

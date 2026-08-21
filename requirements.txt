@@ -13,6 +13,8 @@ google-adk==2.7.1
 
 # --- 정형 데이터 (db/) ---
 # sqlite3는 파이썬 표준 라이브러리 포함, 별도 설치 불필요
+# 국회의원 명단은 BigQuery(다른 팀원이 적재)에서 조회
+google-cloud-bigquery==3.27.0
 
 # --- 벡터DB / 검색 (rag/) ---
 # RAG는 로컬 Chroma 대신 Vertex AI Search(데이터스토어 + VertexAiSearchTool)로 결정.
