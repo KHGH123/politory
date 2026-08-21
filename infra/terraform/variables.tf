@@ -9,7 +9,7 @@ variable "region" {
 
 variable "service_name" {
   type    = string
-  default = "uijeonggirok-backend"
+  default = "politory"
 }
 
 variable "repository_name" {
@@ -24,5 +24,5 @@ variable "repository_owner" {
 
 variable "host_connection_name" {
   type    = string
-  default = "uijeonggirok-github-connection"
+  default = "politory"
 }

@@ -1,0 +1,44 @@
+:root {
+  --paper: #eef0ea;
+  --paper-2: #e4e7dd;
+  --ink: #1e2a22;
+  --navy: #1b2a3d;
+  --navy-2: #2e4460;
+  --brass: #a9822e;
+  --brass-light: #c9a653;
+  --brass-bg: #fbf6ea;
+  --line: #c9cdbe;
+  --muted: #8a7f5e;
+  --primary-bg: #dbeafe;
+  --primary-fg: #1d4ed8;
+  --secondary-bg: #fef3c7;
+  --secondary-fg: #92400e;
+  --danger: #8b3a3a;
+  --agree: #3d6b4f;
+
+  --serif: 'Noto Serif KR', serif;
+  --sans: 'Pretendard', -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --mono: 'IBM Plex Mono', ui-monospace, Consolas, monospace;
+
+  color-scheme: light;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--sans);
+  line-height: 1.6;
+}
+
+#root {
+  min-height: 100svh;
+}

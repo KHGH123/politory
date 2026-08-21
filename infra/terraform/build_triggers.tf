@@ -1,7 +1,7 @@
 resource "google_cloudbuild_trigger" "deploy_backend" {
   project  = var.project_id
   location = var.region
-  name     = "deploy-uijeonggirok-backend"
+  name     = "deploy-politory"
 
   repository_event_config {
     repository = google_cloudbuildv2_repository.backend_repo.id
