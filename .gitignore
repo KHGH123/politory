@@ -16,6 +16,9 @@ data/processed/
 # 프론트엔드
 frontend/node_modules/
 frontend/dist/
+# Dockerfile이 frontend 빌드 결과를 여기로 복사해 FastAPI가 같이 서빙한다
+# (politory 서비스 하나로 통합) — 로컬 검증 시에만 생기는 산출물, 커밋 대상 아님.
+backend/static/
 
 # Terraform
 infra/terraform/.terraform/

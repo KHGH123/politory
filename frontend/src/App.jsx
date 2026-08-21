@@ -4,7 +4,14 @@ import LandingScreen from './screens/LandingScreen'
 import RefineScreen from './screens/RefineScreen'
 import ResultsScreen from './screens/ResultsScreen'
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
+// VITE_API_BASE_URL이 아예 설정 안 됐으면(로컬에서 vite dev로 프론트만 띄운
+// 경우) localhost:8000으로 폴백한다. 빈 문자열("")로 명시적으로 설정된
+// 경우(배포 이미지 — 프론트와 백엔드가 같은 Cloud Run 서비스라 상대 경로로
+// 같은 오리진을 호출해야 함)는 폴백하지 않고 그대로 빈 문자열을 쓴다.
+const API_BASE_URL =
+  import.meta.env.VITE_API_BASE_URL !== undefined
+    ? import.meta.env.VITE_API_BASE_URL
+    : 'http://localhost:8000'
 
 function App() {
   const [stage, setStage] = useState('landing') // 'landing' | 'refine' | 'results'

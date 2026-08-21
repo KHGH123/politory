@@ -2,10 +2,13 @@
 import re
 import uuid
 from datetime import date
+from pathlib import Path
 
 from dateutil import parser as dateutil_parser
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from google import genai
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
@@ -352,3 +355,33 @@ async def query(request: QueryRequest) -> QueryResponse:
     return QueryResponse(
         answer=agent_response.answer, sources=agent_response.sources, member_profile=profile
     )
+
+
+# ---- 프론트엔드 정적 서빙 ----
+# Dockerfile이 frontend를 먼저 빌드해 backend/static/에 dist를 복사해둔다
+# (politory 서비스 하나로 프론트+백엔드를 같이 서빙하기 위함 — 별도 Cloud Run
+# 서비스로 분리했던 이전 시도 대신 이 방식으로 통합). 로컬에서 `uvicorn
+# backend.main:app --reload`만 띄우는 경우엔 이 디렉터리가 없을 수 있으므로
+# 존재할 때만 마운트한다 — 없어도 API 자체는 그대로 동작해야 한다.
+_STATIC_DIR = Path(__file__).parent / "static"
+
+if _STATIC_DIR.is_dir():
+    app.mount("/assets", StaticFiles(directory=_STATIC_DIR / "assets"), name="static-assets")
+
+    # SPA fallback: /api/*, /health가 아닌 모든 GET 경로를 받는다. favicon.svg
+    # 처럼 dist 최상위에 있는 파일(assets/ 밖)은 요청 경로 그대로 존재하면
+    # 그 파일을 서빙하고, 없으면(클라이언트 라우팅 경로 등) index.html로
+    # 폴백한다. 이 라우트를 맨 마지막에 등록해야 위의 /api/*, /health 라우트가
+    # 먼저 매칭된다(FastAPI는 등록 순서대로 매칭 시도).
+    @app.get("/{full_path:path}")
+    def serve_frontend(full_path: str) -> FileResponse:
+        candidate = (_STATIC_DIR / full_path).resolve()
+        # candidate가 static 디렉터리 밖으로 벗어나지 않는지 확인한다
+        # (예: full_path="../../etc/passwd" 같은 경로 순회 방지).
+        if (
+            full_path
+            and candidate.is_relative_to(_STATIC_DIR.resolve())
+            and candidate.is_file()
+        ):
+            return FileResponse(candidate)
+        return FileResponse(_STATIC_DIR / "index.html")
