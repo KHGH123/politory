@@ -1,8 +1,12 @@
 import { truncate } from '../utils'
 
+const ACCENTS = ['brass', 'teal', 'wine']
+
 function RefineScreen({
   memberName,
   onMemberNameChange,
+  memberCandidates,
+  onCandidateSelect,
   keywordSuggestions,
   onSubmit,
   onKeywordClick,
@@ -12,11 +16,15 @@ function RefineScreen({
 }) {
   return (
     <div className="page is-landing">
+      <button type="button" className="back-link" onClick={onReset}>
+        ← 처음으로
+      </button>
+
       <div className="refine-card">
         <div className="refine-hero">
-          <button type="button" className="landing-logo small logo-link" onClick={onReset}>
+          <div className="landing-logo small">
             의정기록<span>.</span>
-          </button>
+          </div>
         </div>
 
         <form className="refine" onSubmit={onSubmit}>
@@ -34,6 +42,26 @@ function RefineScreen({
             autoFocus
           />
 
+          {memberCandidates && memberCandidates.length > 0 && (
+            <>
+              <label className="field-label">동명이인 — 찾으시는 분을 선택하세요</label>
+              <div className="keyword-grid">
+                {memberCandidates.map((c, i) => (
+                  <button
+                    type="button"
+                    key={i}
+                    className={`keyword-card accent-${ACCENTS[i % ACCENTS.length]}`}
+                    disabled={loading}
+                    onClick={() => onCandidateSelect(c)}
+                  >
+                    <div className="keyword-title">{c.name}</div>
+                    <div className="keyword-reason">{c.party || '정당 정보 없음'}</div>
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+
           {keywordSuggestions.length > 0 && (
             <>
               <label className="field-label">키워드 선택</label>
@@ -42,7 +70,7 @@ function RefineScreen({
                   <button
                     type="button"
                     key={i}
-                    className="keyword-card"
+                    className={`keyword-card accent-${ACCENTS[i % ACCENTS.length]}`}
                     disabled={loading}
                     onClick={() => onKeywordClick(kw.title)}
                   >

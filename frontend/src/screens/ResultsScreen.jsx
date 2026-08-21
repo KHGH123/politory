@@ -3,18 +3,42 @@ const SOURCE_LABEL = {
   secondary: '2차 · 뉴스 보도',
 }
 
-function ResultsScreen({ question, result, onReset }) {
+function ResultsScreen({ question, memberName, result, onReset }) {
   return (
     <div className="page is-results">
+      <button type="button" className="back-link" onClick={onReset}>
+        ← 처음으로
+      </button>
+
       <div className="masthead">
-        <button type="button" className="logo logo-link" onClick={onReset}>
+        <div className="logo">
           의정기록<span>.</span>
-        </button>
+        </div>
         <div className="tag">국회의원 통합 의정활동 조회</div>
       </div>
 
       {result && (
         <>
+          {memberName && (
+            <div className="profile-card">
+              <div className="profile-photo" aria-hidden="true">
+                <svg width="34" height="34" viewBox="0 0 24 24" fill="none">
+                  <circle cx="12" cy="8" r="4" stroke="currentColor" strokeWidth="1.6" />
+                  <path
+                    d="M4 20c0-4 3.6-6.5 8-6.5s8 2.5 8 6.5"
+                    stroke="currentColor"
+                    strokeWidth="1.6"
+                    strokeLinecap="round"
+                  />
+                </svg>
+              </div>
+              <div className="profile-body">
+                <div className="profile-name">{memberName}</div>
+                <div className="profile-bio">약력 정보 준비 중 · 국회 공공데이터 연동 예정</div>
+              </div>
+            </div>
+          )}
+
           <div className="section-label">RAG Summary</div>
           <div className="section-title">답변</div>
           <div className="ai-answer">

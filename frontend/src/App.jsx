@@ -10,6 +10,13 @@ function App() {
   const [stage, setStage] = useState('landing') // 'landing' | 'refine' | 'results'
   const [question, setQuestion] = useState('')
   const [memberName, setMemberName] = useState('')
+  // classify가 DB에서 실존을 확인해준 이름만 여기 들어감 (memberName은 화면2에서
+  // 자유 편집 가능한 표시값이라 이름이 아닌 정책 텍스트가 섞일 수 있음 — /api/query는
+  // member_name이 DB에 없으면 404를 내므로 미확정 텍스트를 member_name으로 보내면 안 됨)
+  const [confirmedMemberName, setConfirmedMemberName] = useState('')
+  const [confirmedParty, setConfirmedParty] = useState('')
+  // 동명이인 후보 목록 (classify가 이름만으로 특정 못 했을 때)
+  const [memberCandidates, setMemberCandidates] = useState([])
   const [keywordSuggestions, setKeywordSuggestions] = useState([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
@@ -40,9 +47,11 @@ function App() {
       const data = await res.json()
 
       if (data.sufficient) {
-        await runQuery(data.member_name || question, '')
+        await runQuery(question, data.member_name, null, '')
       } else {
         setMemberName(data.member_name || question)
+        setConfirmedMemberName(data.member_name || '')
+        setMemberCandidates(data.member_candidates || [])
         setKeywordSuggestions(data.keywords || [])
         setStage('refine')
         setLoading(false)
@@ -53,7 +62,10 @@ function App() {
     }
   }
 
-  async function runQuery(memberNameValue, keywordValue) {
+  // effectiveQuestion: 화면2에서 "특정인/정책" 칸을 수정했으면 그 값이 실제 검색어가 되어야 함
+  // (원래 화면1 질문을 그대로 쓰면 화면2에서 고친 내용이 무시되는 버그가 있었음)
+  async function runQuery(effectiveQuestion, memberNameValue, partyValue, keywordValue) {
+    setQuestion(effectiveQuestion)
     setLoading(true)
     setError(null)
     setResult(null)
@@ -63,8 +75,9 @@ function App() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          question,
+          question: effectiveQuestion,
           member_name: memberNameValue || null,
+          party: partyValue || null,
           keyword: keywordValue || null,
         }),
       })
@@ -82,13 +95,40 @@ function App() {
     }
   }
 
-  function handleReset() {
+  // 동명이인 후보 카드 선택: 이름 + 정당까지 확정해서 이후 검색이 그 사람으로 특정되게 함
+  function handleCandidateSelect(candidate) {
+    setMemberName(candidate.name)
+    setConfirmedMemberName(candidate.name)
+    setConfirmedParty(candidate.party || '')
+    setMemberCandidates([])
+  }
+
+  // 화면2 → 화면1: 완전히 처음으로
+  function handleBackToLanding() {
     setStage('landing')
     setQuestion('')
     setMemberName('')
+    setConfirmedMemberName('')
+    setConfirmedParty('')
+    setMemberCandidates([])
     setKeywordSuggestions([])
     setResult(null)
     setError(null)
+  }
+
+  // 화면3 → 화면2 (화면2를 거쳐왔으면) 또는 화면1 (화면1에서 바로 왔으면)
+  function handleBackFromResults() {
+    setResult(null)
+    setError(null)
+    if (keywordSuggestions.length > 0) {
+      setStage('refine')
+    } else {
+      setStage('landing')
+      setQuestion('')
+      setMemberName('')
+      setConfirmedMemberName('')
+      setConfirmedParty('')
+    }
   }
 
   if (stage === 'landing') {
@@ -108,20 +148,31 @@ function App() {
       <RefineScreen
         memberName={memberName}
         onMemberNameChange={setMemberName}
+        memberCandidates={memberCandidates}
+        onCandidateSelect={handleCandidateSelect}
         keywordSuggestions={keywordSuggestions}
         onSubmit={(e) => {
           e.preventDefault()
-          runQuery(memberName, '')
+          runQuery(memberName, confirmedMemberName || null, confirmedParty || null, memberName)
         }}
-        onKeywordClick={(kw) => runQuery(memberName, kw)}
-        onReset={handleReset}
+        onKeywordClick={(kw) =>
+          runQuery(memberName, confirmedMemberName || null, confirmedParty || null, kw)
+        }
+        onReset={handleBackToLanding}
         loading={loading}
         error={error}
       />
     )
   }
 
-  return <ResultsScreen question={question} result={result} onReset={handleReset} />
+  return (
+    <ResultsScreen
+      question={question}
+      memberName={memberName}
+      result={result}
+      onReset={handleBackFromResults}
+    />
+  )
 }
 
 export default App
