@@ -1,0 +1,510 @@
+@keyframes fadeSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes cardIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+body {
+  background-image:
+    radial-gradient(circle at 1px 1px, var(--paper-2) 1px, transparent 0);
+  background-size: 22px 22px;
+}
+
+.page {
+  max-width: 920px;
+  margin: 0 auto;
+  padding: 24px 32px;
+  animation: fadeSlideIn 0.4s ease both;
+}
+
+/* Landing (Google-style, pre-search): centered, minimal */
+.page.is-landing {
+  min-height: 100svh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+}
+.page.is-landing .searchbar {
+  width: 100%;
+  max-width: 600px;
+}
+.back-link {
+  position: absolute;
+  top: 32px;
+  left: 32px;
+  background: none;
+  border: none;
+  padding: 0;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  color: var(--muted);
+  cursor: pointer;
+  transition: color 0.15s;
+}
+.page.is-results .back-link {
+  position: static;
+  display: block;
+  margin-bottom: 16px;
+}
+.back-link:hover {
+  color: var(--brass);
+}
+.landing-hero {
+  text-align: center;
+  margin-bottom: 24px;
+}
+.landing-logo {
+  font-family: var(--serif);
+  font-weight: 700;
+  font-size: 44px;
+  color: var(--navy);
+  letter-spacing: -0.02em;
+}
+.landing-logo span {
+  color: var(--brass);
+}
+
+.logo-link {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  font: inherit;
+}
+
+.hint {
+  margin-top: 16px;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  color: var(--muted);
+  text-align: center;
+}
+
+/* Results state: top-aligned document layout */
+.page.is-results {
+  padding: 40px 24px 100px;
+}
+
+/* Refine stage: 특정인/정책 + 키워드 카드 */
+.refine-card {
+  width: 100%;
+  max-width: 640px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-top: 4px solid var(--navy);
+  border-radius: 8px;
+  padding: 36px 40px 40px;
+  box-shadow: 0 8px 28px rgba(27, 42, 61, 0.1);
+  animation: cardIn 0.35s ease both;
+}
+.refine-hero {
+  border-bottom: 1.5px solid var(--navy);
+  padding-bottom: 14px;
+  margin-bottom: 24px;
+}
+.landing-logo.small {
+  font-size: 22px;
+}
+
+.refine {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.field-label {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--brass);
+  margin-top: 14px;
+}
+.field-label:first-of-type {
+  margin-top: 0;
+}
+.refine-field {
+  padding: 14px 16px;
+  border: 1.5px solid var(--navy);
+  background: #fff;
+  font-family: var(--sans);
+  font-size: 15px;
+  border-radius: 3px;
+  color: var(--ink);
+  margin-bottom: 4px;
+  transition: box-shadow 0.15s;
+}
+.refine-field:focus {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(169, 130, 46, 0.18);
+}
+
+.keyword-grid {
+  display: flex;
+  gap: 10px;
+  margin-top: 4px;
+}
+.keyword-card {
+  flex: 1;
+  padding: 18px 16px 16px;
+  border: 1.5px solid var(--line);
+  border-top: 3px solid var(--accent, var(--brass));
+  background: var(--paper);
+  border-radius: 6px;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.15s, background 0.15s, transform 0.15s, box-shadow 0.15s;
+  animation: cardIn 0.3s ease both;
+}
+.keyword-card.accent-brass {
+  --accent: var(--brass);
+}
+.keyword-card.accent-teal {
+  --accent: var(--agree);
+}
+.keyword-card.accent-wine {
+  --accent: var(--danger);
+}
+.keyword-card:hover:not(:disabled) {
+  background: #fff;
+  transform: translateY(-3px);
+  box-shadow: 0 6px 18px rgba(27, 42, 61, 0.12);
+}
+.keyword-card:active:not(:disabled) {
+  transform: translateY(0);
+}
+.keyword-card:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.keyword-title {
+  font-family: var(--serif);
+  font-weight: 700;
+  font-size: 16px;
+  color: var(--navy);
+  margin-bottom: 6px;
+}
+.keyword-reason {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+/* Masthead */
+.masthead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  border-bottom: 2px solid var(--navy);
+  padding-bottom: 14px;
+  margin-bottom: 28px;
+}
+.masthead .logo {
+  font-family: var(--serif);
+  font-weight: 700;
+  font-size: 20px;
+  letter-spacing: -0.02em;
+  color: var(--navy);
+}
+.masthead .logo span {
+  color: var(--brass);
+}
+.masthead .tag {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+  letter-spacing: 0.02em;
+}
+
+/* Search (landing) — Google 스타일 pill 검색창 */
+.searchbar {
+  display: flex;
+}
+.search-box {
+  position: relative;
+  width: 100%;
+}
+.search-icon {
+  position: absolute;
+  left: 20px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--muted);
+  pointer-events: none;
+}
+.searchbar input[type='text'] {
+  width: 100%;
+  padding: 16px 20px 16px 50px;
+  border: 1px solid var(--line);
+  background: #fff;
+  font-family: var(--sans);
+  font-size: 16px;
+  border-radius: 999px;
+  color: var(--ink);
+  box-shadow: 0 1px 6px rgba(27, 42, 61, 0.08);
+  transition: box-shadow 0.2s, border-color 0.2s;
+}
+.searchbar input[type='text']:hover {
+  box-shadow: 0 2px 10px rgba(27, 42, 61, 0.12);
+}
+.searchbar input[type='text']:focus {
+  outline: none;
+  border-color: var(--brass-light);
+  box-shadow: 0 2px 14px rgba(169, 130, 46, 0.2);
+}
+.searchbar input::placeholder {
+  color: #9a9a8f;
+}
+.searchbar input:disabled {
+  background: var(--paper-2);
+}
+
+.error {
+  color: var(--danger);
+  font-size: 13.5px;
+  margin-top: 16px;
+  text-align: center;
+}
+
+/* Section label */
+.section-label {
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--brass);
+  margin: 0 0 4px;
+}
+.section-title {
+  font-family: var(--serif);
+  font-size: 19px;
+  font-weight: 600;
+  color: var(--navy);
+  margin-bottom: 18px;
+}
+
+/* Profile header (results top) */
+.profile-card {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 18px 22px;
+  margin-bottom: 28px;
+  background: var(--brass-bg);
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--brass);
+  border-radius: 6px;
+  animation: cardIn 0.35s ease both;
+}
+.profile-photo {
+  flex: none;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: #fff;
+  border: 1.5px solid var(--brass-light);
+  color: var(--brass);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.profile-name {
+  font-family: var(--serif);
+  font-weight: 700;
+  font-size: 18px;
+  color: var(--navy);
+}
+.profile-bio {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--muted);
+  margin-top: 4px;
+}
+
+/* AI answer callout */
+.ai-answer {
+  background: var(--navy);
+  color: #edefe6;
+  border-radius: 6px;
+  padding: 22px 24px;
+  margin-bottom: 8px;
+  font-size: 14.5px;
+  line-height: 1.75;
+  white-space: pre-wrap;
+  animation: cardIn 0.4s ease both;
+}
+.ai-answer .q {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--brass-light);
+  margin-bottom: 10px;
+  letter-spacing: 0.02em;
+}
+.ai-answer .disclaimer {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.15);
+  font-size: 12px;
+  color: #a9b4a8;
+}
+
+/* 각주 링크 — answer 문장 끝의 [1], [2] */
+.footnote {
+  display: inline;
+  border: none;
+  background: none;
+  padding: 0 1px;
+  margin: 0;
+  font: inherit;
+  font-size: 0.85em;
+  font-family: var(--mono);
+  color: var(--brass-light);
+  cursor: pointer;
+  vertical-align: super;
+  line-height: 1;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.footnote:hover {
+  color: #fff;
+}
+
+/* Timeline */
+.timeline {
+  position: relative;
+  padding-left: 28px;
+  margin-top: 28px;
+}
+.timeline::before {
+  content: '';
+  position: absolute;
+  left: 6px;
+  top: 6px;
+  bottom: 6px;
+  width: 1.5px;
+  background: var(--line);
+}
+.t-item {
+  position: relative;
+  margin-bottom: 22px;
+  animation: cardIn 0.35s ease both;
+}
+.t-item::before {
+  content: '';
+  position: absolute;
+  left: -28px;
+  top: 4px;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2.5px solid var(--brass);
+}
+.t-date {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--navy);
+  font-weight: 500;
+  margin-bottom: 6px;
+}
+.t-card {
+  position: relative;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 16px 18px;
+  scroll-margin-top: 24px;
+  transition: box-shadow 0.15s, border-color 0.4s, background 0.4s;
+}
+.t-card:hover {
+  box-shadow: 0 2px 10px rgba(27, 42, 61, 0.08);
+}
+.t-card-highlight {
+  border-color: var(--brass);
+  background: var(--brass-bg);
+}
+.t-index {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--brass);
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+.t-quote {
+  font-size: 14.5px;
+  font-weight: 600;
+  color: var(--navy);
+  line-height: 1.5;
+}
+.t-summary {
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.6;
+  margin-top: 6px;
+}
+.t-excerpt {
+  font-size: 13.5px;
+  color: var(--ink);
+  line-height: 1.7;
+  font-style: italic;
+  border-left: 2.5px solid var(--paper-2);
+  padding-left: 12px;
+  margin-top: 8px;
+}
+.t-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+.t-source {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--brass);
+  text-decoration: none;
+}
+.source-tag {
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 3px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.source-tag.primary {
+  background: var(--primary-bg);
+  color: var(--primary-fg);
+}
+.source-tag.secondary {
+  background: var(--secondary-bg);
+  color: var(--secondary-fg);
+}
+
+footer {
+  margin-top: 50px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+  font-size: 11.5px;
+  color: var(--muted);
+  text-align: center;
+}
