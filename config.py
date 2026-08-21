@@ -1,6 +1,7 @@
 """전체 프로젝트가 공유하는 설정. 모든 명령/스크립트는 레포 루트에서 실행한다고 가정한다."""
 from functools import lru_cache
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -21,7 +22,11 @@ class Settings(BaseSettings):
     GOOGLE_APPLICATION_CREDENTIALS: str = ""
     MODEL: str = "gemini-3.5-flash"
 
-    # 웹 검색 도구 (뉴스 2차 출처용)
+    # 웹 검색 도구 (뉴스 2차 출처용) — NAVER API HUB 뉴스 검색.
+    # .env의 실제 키 이름(X-NCP-APIGW-API-KEY-ID 등)은 파이썬 식별자로 못 써서
+    # validation_alias로 매핑한다.
+    NAVER_CLIENT_ID: str = Field(default="", validation_alias="X-NCP-APIGW-API-KEY-ID")
+    NAVER_CLIENT_SECRET: str = Field(default="", validation_alias="X-NCP-APIGW-API-KEY")
     WEB_SEARCH_API_KEY: str = ""
 
     # 저장소
