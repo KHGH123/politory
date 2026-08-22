@@ -10,6 +10,7 @@ venv/
 
 # 데이터 / 저장소 (1회성 수집 데이터는 팀 내부 공유, 레포에는 커밋하지 않음)
 *.sqlite3
+data/
 data/raw/
 data/processed/
 
