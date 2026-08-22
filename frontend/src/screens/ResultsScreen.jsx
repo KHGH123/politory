@@ -30,23 +30,22 @@ function renderAnswerWithFootnotes(answer, onFootnoteClick, visibleIndexSet) {
   })
 }
 
-// member_profile의 party/district/committee/term_count/status 중 값이 있는 것만
-// " · "로 이어붙인다. 값이 없는 필드(예: 위원회 정보가 API에 없는 경우)는 건너뛴다.
-function buildBioLine(profile) {
-  if (!profile) return null
-  const parts = [
-    profile.party,
-    profile.district,
-    profile.committee,
+// 명함형 카드 우측에 지역구/위원회/선수·대수를 한 줄씩 따로 보여준다.
+// 값이 없는 줄은 아예 표시하지 않는다.
+function buildProfileRows(profile) {
+  if (!profile) return []
+  const termStatus = [
     profile.term_count ? `${profile.term_count}선` : null,
     profile.status,
-  ].filter(Boolean)
-  return parts.length > 0 ? parts.join(' · ') : null
+  ]
+    .filter(Boolean)
+    .join(' · ')
+  return [profile.district, profile.committee, termStatus || null].filter(Boolean)
 }
 
 function ResultsScreen({ question, memberName, result, onReset }) {
   const profile = result?.member_profile
-  const bioLine = buildBioLine(profile)
+  const profileRows = buildProfileRows(profile)
   // url 있는 source의 1-based 인덱스만 "클릭 가능한 각주"로 취급한다.
   const visibleIndexSet = new Set(
     (result?.sources || []).flatMap((s, i) => (s.url ? [i + 1] : []))
@@ -77,27 +76,37 @@ function ResultsScreen({ question, memberName, result, onReset }) {
       {result && (
         <>
           {memberName && (
-            <div className="profile-card">
-              <div className="profile-photo" aria-hidden="true">
-                {profile?.image_url ? (
-                  <img src={profile.image_url} alt="" />
-                ) : (
-                  <svg width="34" height="34" viewBox="0 0 24 24" fill="none">
-                    <circle cx="12" cy="8" r="4" stroke="currentColor" strokeWidth="1.6" />
-                    <path
-                      d="M4 20c0-4 3.6-6.5 8-6.5s8 2.5 8 6.5"
-                      stroke="currentColor"
-                      strokeWidth="1.6"
-                      strokeLinecap="round"
-                    />
-                  </svg>
-                )}
-              </div>
-              <div className="profile-body">
-                <div className="profile-name">{profile?.name || memberName}</div>
-                <div className="profile-bio">
-                  {bioLine || '약력 정보 준비 중 · 국회 공공데이터 연동 예정'}
+            <div className="profile-card profile-card-id">
+              <div className="profile-id-block">
+                <div className="profile-photo profile-photo-large" aria-hidden="true">
+                  {profile?.image_url ? (
+                    <img src={profile.image_url} alt="" />
+                  ) : (
+                    <svg width="40" height="40" viewBox="0 0 24 24" fill="none">
+                      <circle cx="12" cy="8" r="4" stroke="currentColor" strokeWidth="1.6" />
+                      <path
+                        d="M4 20c0-4 3.6-6.5 8-6.5s8 2.5 8 6.5"
+                        stroke="currentColor"
+                        strokeWidth="1.6"
+                        strokeLinecap="round"
+                      />
+                    </svg>
+                  )}
                 </div>
+                <div className="profile-name">{profile?.name || memberName}</div>
+                <div className="profile-party">{profile?.party || '정당 정보 없음'}</div>
+              </div>
+
+              <div className="profile-detail-rows">
+                {profileRows.length > 0 ? (
+                  profileRows.map((row, i) => (
+                    <div className="profile-detail-row" key={i}>
+                      {row}
+                    </div>
+                  ))
+                ) : (
+                  <div className="profile-detail-row">약력 정보 준비 중 · 국회 공공데이터 연동 예정</div>
+                )}
               </div>
             </div>
           )}
