@@ -11,8 +11,11 @@ BigQuery members 테이블(config.BIGQUERY_MEMBERS_TABLE)에 적재한다.
 이 API로 채울 수 없는 필드(military, criminal, sns)는 NULL로 둔다.
 
 사용법:
-    python -m pipeline.collect_members --inspect   # 실제 응답 필드명 확인용, BigQuery 미적재
-    python -m pipeline.collect_members              # 수집 + BigQuery 적재
+    python -m pipeline.collect_members --inspect            # 실제 응답 필드명 확인용, BigQuery 미적재
+    python -m pipeline.collect_members --dry-run             # 22대 기준 변환 결과만 출력, BigQuery 미적재
+    python -m pipeline.collect_members --dry-run --dae-num 21  # 21대 이상 기준으로 미리보기
+    python -m pipeline.collect_members                       # 수집 + BigQuery 적재 (기본 22대 이상)
+    python -m pipeline.collect_members --dae-num 21          # 21대 이상 기준으로 적재
 """
 import argparse
 import re
@@ -36,6 +39,7 @@ _FIELD = {
     "district": "ELECD_NM",
     "elect_type": "ELECD_DIV_NM",
     "committee": "CMIT_NM",
+    "committee_fallback": "BLNG_CMIT_NM",
     "term_count_raw": "RLCT_DIV_NM",
     "email": "NAAS_EMAIL_ADDR",
     "dae_num": "GTELT_ERACO",
@@ -185,14 +189,17 @@ def transform(raw_rows: list[dict]) -> list[dict]:
                 "criminal": None,
                 "email": _pick(raw, "email"),
                 "sns": [],
-                "committee": _pick(raw, "committee"),
+                # CMIT_NM(현재 소속 위원회)이 비어있는 현직 의원이 있다(예: 권성동, 원내대표급도 예외 아님).
+                # BLNG_CMIT_NM(소속 위원회 이력)에는 값이 남아있는 경우가 많아 폴백으로 쓴다.
+                # BLNG_CMIT_NM도 party/district처럼 여러 대수 이력이 "/"로 이어질 수 있어 마지막 값만 취한다.
+                "committee": _pick(raw, "committee") or _last_segment(_pick(raw, "committee_fallback")),
                 "district": district,
                 "term_count": _parse_term_count(_pick(raw, "term_count_raw")),
-                # ALLNAMEMBER엔 명시적 현직 플래그가 없다. CMIT_NM/이메일 유무로 유추해봤는데
-                # 원내대표급 현역 의원도 이 필드들이 비어있는 경우가 있어(예: 권성동) 신뢰 불가.
-                # MIN_DAE_NUM=22 필터를 통과했다는 건 최소 22대 재임 이력은 있다는 뜻이므로
-                # 일단 전원 "현직"으로 채우고, 임기 중 승계/제명으로 교체된 소수는 못 걸러낸다.
-                "status": "현직",
+                # ALLNAMEMBER엔 명시적 현직 플래그가 없고(getMemberCurrStateList도 폐기돼 대체 불가,
+                # 2026-08-22 확인), CMIT_NM/이메일 유무로도 신뢰 있게 유추 못 한다(예: 권성동은
+                # 현역인데도 비어있음). 그래서 "현직"이라 단정하는 대신, 실제로 검증 가능한 사실인
+                # 최근 재임 대수만 보여준다 - GTELT_ERACO 최댓값(필터 통과 조건과 동일한 값).
+                "status": f"제{_max_era(_pick(raw, 'dae_num'))}대",
             }
         )
     return out
@@ -221,6 +228,8 @@ def load(rows: list[dict]) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--inspect", action="store_true", help="첫 페이지 raw 응답만 출력하고 종료 (필드명 검증용)")
+    parser.add_argument("--dry-run", action="store_true", help="fetch+filter+transform까지만 하고 BigQuery 적재 없이 결과를 텍스트로 출력")
+    parser.add_argument("--dae-num", type=int, default=MIN_DAE_NUM, help=f"몇 대 이상 의원을 수집할지 (기본 {MIN_DAE_NUM})")
     args = parser.parse_args()
 
     if args.inspect:
@@ -235,8 +244,17 @@ def main() -> None:
         return
 
     raw_rows = fetch_all(settings.ASSEMBLY_API_KEY)
-    raw_rows = filter_min_dae_num(raw_rows, MIN_DAE_NUM)
+    raw_rows = filter_min_dae_num(raw_rows, args.dae_num)
     rows = transform(raw_rows)
+
+    if args.dry_run:
+        import json
+
+        for row in rows:
+            print(json.dumps(row, ensure_ascii=False))
+        print(f"\n총 {len(rows)}건 (BigQuery 미적재, --dry-run)")
+        return
+
     load(rows)
 
 
