@@ -49,7 +49,7 @@ class KeywordSuggestion(BaseModel):
 
 
 class MemberCandidate(BaseModel):
-    """동명이인 판별용 — 이름만으로 특정이 안 될 때 화면2에서 선택 카드로 보여줌."""
+    """화면2 선택 카드용 — 동명이인 특정 또는 정책 기반 의원 추천, 두 경우 모두 재사용."""
 
     name: str
     party: str | None = None
@@ -76,6 +76,11 @@ class _ClassifyLLMOutput(BaseModel):
     sufficient: bool
     member_name: str | None = None
     keywords: list[KeywordSuggestion] = []
+    # 질문에 의원 이름이 없을 때, 관련 있을 법한 상임위원회 이름 하나(예: "국토교통위원회").
+    # 이것도 DB 검증 없이 그대로 응답에 노출하면 안 되므로(위원회 자체는 지어낼 수 없는
+    # 고정된 목록이라 hallucination 우려는 적지만, 오타/변형 표기 가능성은 있음) classify()가
+    # 이 값으로 BigQuery를 조회해 실제 소속 의원만 member_candidates로 반환한다.
+    committee_guess: str | None = None
 
 
 # ---- MP(국회의원) BigQuery 조회 공용 모델 ----
@@ -147,6 +152,28 @@ def _find_members_by_name(name: str) -> list[MemberCandidate]:
     ]
 
 
+def _find_members_by_committee(committee_guess: str, limit: int = 3) -> list[MemberCandidate]:
+    """상임위원회 이름으로 소속 의원을 찾는다 (정책 질문에서 인물을 역으로 추천할 때 사용).
+
+    committee 컬럼은 "연금개혁 특별위원회, 보건복지위원회"처럼 여러 위원회가
+    콤마로 붙어있을 수 있어 LIKE로 부분일치한다.
+    """
+    job = _bq_client.query(
+        f"SELECT name, party, image_url FROM `{_MEMBERS_TABLE}` "
+        f"WHERE committee LIKE @pattern ORDER BY term_count DESC, name LIMIT @limit",
+        job_config=bigquery.QueryJobConfig(
+            query_parameters=[
+                bigquery.ScalarQueryParameter("pattern", "STRING", f"%{committee_guess}%"),
+                bigquery.ScalarQueryParameter("limit", "INT64", limit),
+            ]
+        ),
+    )
+    return [
+        MemberCandidate(name=row.name, party=row.party, image_url=row.image_url)
+        for row in job.result()
+    ]
+
+
 def _get_member_profile(name: str, party: str | None = None) -> MemberProfile | None:
     """약력 카드용 필드를 조회. 없으면 None.
 
@@ -180,9 +207,13 @@ def classify(request: ClassifyRequest) -> ClassifyResponse:
 바로 의정활동을 조회할 수 있을 만큼 충분히 구체적인지 판단해라.
 
 - 충분하면 sufficient=true로 하라.
-- 불충분하면 sufficient=false로 하고, 이 질문과 관련될 만한 정책 키워드를
-  최대 3개까지 추천해라. 각 키워드에는 왜 이 키워드를 추천하는지
-  20자 이내로 짧게 이유를 적어라. 없는 사실을 지어내지 마라."""
+- 불충분하고 member_name이 있으면, 그 의원과 관련될 만한 정책 키워드를
+  최대 3개까지 추천해라(keywords). 각 키워드에는 왜 이 키워드를 추천하는지
+  20자 이내로 짧게 이유를 적어라. 없는 사실을 지어내지 마라.
+- 불충분하고 member_name이 없으면(정책/이슈만 있고 특정 인물이 없는 질문),
+  keywords는 비워두고 대신 이 정책/이슈를 주로 다루는 대한민국 국회 상임위원회
+  이름 하나를 committee_guess에 채워라(예: "국토교통위원회", "보건복지위원회",
+  "기획재정위원회" 등 실제 상임위 명칭 그대로). 확신이 없어도 가장 가까운 걸로 채워라."""
 
     response = _genai_client.models.generate_content(
         model=settings.MODEL,
@@ -212,6 +243,15 @@ def classify(request: ClassifyRequest) -> ClassifyResponse:
             result.sufficient = False
             result.member_name = None
             result.member_candidates = candidates
+    elif llm_result.committee_guess:
+        # 인물 없이 정책만 있는 질문 — "검색축은 인물"이라는 원칙에 따라 정책 키워드
+        # 대신 그 정책을 다루는 상임위 소속 실제 의원을 추천 카드로 보여준다.
+        # committee_guess 자체는 DB에 없을 수도 있으니(오타/변형 표기), 매칭되는
+        # 의원이 없으면 원래 하던 대로 정책 키워드로 폴백한다.
+        committee_matches = _find_members_by_committee(llm_result.committee_guess)
+        if committee_matches:
+            result.member_candidates = committee_matches
+            result.keywords = []
 
     return result
 
