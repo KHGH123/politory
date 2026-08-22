@@ -17,6 +17,9 @@ data/processed/
 # 프론트엔드
 frontend/node_modules/
 frontend/dist/
+# Dockerfile이 frontend 빌드 결과를 여기로 복사해 FastAPI가 같이 서빙한다
+# (politory 서비스 하나로 통합) — 로컬 검증 시에만 생기는 산출물, 커밋 대상 아님.
+backend/static/
 
 # Terraform
 infra/terraform/.terraform/
@@ -24,11 +27,16 @@ infra/terraform/*.tfstate*
 infra/terraform/terraform.tfvars
 infra/terraform/tfplan
 
+# ADK 로컬 세션 (adk web 실행 시 생성)
+agent/.adk/
+
 # 에디터/OS
 .vscode/
 .idea/
 .DS_Store
 
-#claude
+API.md
+# claude — CLAUDE.md는 이미 git에 추적 중이라 이 규칙은 새 untracked 사본에만
+# 적용된다(예: .CLAUDE.md 같은 로컬 임시 사본).
 CLAUDE.md
 .CLAUDE.md

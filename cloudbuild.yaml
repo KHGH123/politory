@@ -1,5 +1,8 @@
 # CI/CD 파이프라인 (Terraform으로 트리거 생성, infra/terraform 참고).
 # 브랜치 푸시 -> 이 파일 실행 -> Cloud Run에 backend 배포.
+# Dockerfile이 멀티스테이지로 frontend(Vite)까지 빌드해 backend/static/에
+# 넣으므로, politory 서비스 하나가 프론트+백엔드를 함께 서빙한다
+# (backend/main.py의 "프론트엔드 정적 서빙" 섹션 참고).
 steps:
   - name: "gcr.io/cloud-builders/docker"
     args:
