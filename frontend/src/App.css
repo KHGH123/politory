@@ -342,9 +342,13 @@ body {
 /* 명함형 프로필 카드: 왼쪽에 사진+이름+정당, 오른쪽에 지역구/위원회/선수 각 한 줄 */
 .profile-card-id {
   align-items: stretch;
-  gap: 24px;
-  padding: 20px 26px;
-  border-radius: 14px;
+  gap: 30px;
+  padding: 26px 32px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--brass);
+  border-radius: 16px;
+  box-shadow: 0 12px 32px rgba(27, 42, 61, 0.09);
 }
 .profile-id-block {
   flex: none;
@@ -352,37 +356,55 @@ body {
   flex-direction: column;
   align-items: center;
   text-align: center;
-  gap: 6px;
-  padding-right: 22px;
+  gap: 12px;
+  padding-right: 30px;
   border-right: 1px solid var(--line);
 }
 .profile-photo-large {
-  width: 72px;
-  height: 72px;
+  width: 88px;
+  height: 88px;
+  border-width: 2px;
+  box-shadow: 0 6px 16px rgba(169, 130, 46, 0.22);
+}
+.profile-id-block .profile-name {
+  font-size: 21px;
 }
 .profile-party {
-  font-family: var(--mono);
-  font-size: 11px;
-  color: var(--muted);
+  font-family: var(--sans);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--brass);
+  background: var(--brass-bg);
+  border: 1px solid var(--brass-light);
+  padding: 4px 14px;
+  border-radius: 999px;
 }
 .profile-detail-rows {
   flex: 1;
   display: flex;
   flex-direction: column;
   justify-content: center;
-  gap: 10px;
+  gap: 16px;
   min-width: 0;
 }
 .profile-detail-row {
-  font-family: var(--mono);
-  font-size: 12.5px;
-  color: var(--ink);
-  padding-bottom: 8px;
-  border-bottom: 1px solid var(--line);
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
 }
-.profile-detail-row:last-child {
-  border-bottom: none;
-  padding-bottom: 0;
+.profile-detail-label {
+  flex: none;
+  width: 52px;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+.profile-detail-value {
+  font-family: var(--sans);
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--ink);
 }
 
 /* AI answer callout */

@@ -30,7 +30,7 @@ function renderAnswerWithFootnotes(answer, onFootnoteClick, visibleIndexSet) {
   })
 }
 
-// 명함형 카드 우측에 지역구/위원회/선수·대수를 한 줄씩 따로 보여준다.
+// 명함형 카드 우측에 지역구/위원회/선수·대수를 라벨과 함께 한 줄씩 보여준다.
 // 값이 없는 줄은 아예 표시하지 않는다.
 function buildProfileRows(profile) {
   if (!profile) return []
@@ -40,7 +40,11 @@ function buildProfileRows(profile) {
   ]
     .filter(Boolean)
     .join(' · ')
-  return [profile.district, profile.committee, termStatus || null].filter(Boolean)
+  return [
+    { label: '지역구', value: profile.district },
+    { label: '위원회', value: profile.committee },
+    { label: '선수', value: termStatus },
+  ].filter((row) => row.value)
 }
 
 function ResultsScreen({ question, memberName, result, onReset }) {
@@ -101,7 +105,8 @@ function ResultsScreen({ question, memberName, result, onReset }) {
                 {profileRows.length > 0 ? (
                   profileRows.map((row, i) => (
                     <div className="profile-detail-row" key={i}>
-                      {row}
+                      <span className="profile-detail-label">{row.label}</span>
+                      <span className="profile-detail-value">{row.value}</span>
                     </div>
                   ))
                 ) : (
