@@ -30,7 +30,23 @@ function renderAnswerWithFootnotes(answer, onFootnoteClick, visibleIndexSet) {
   })
 }
 
+// member_profile의 party/district/committee/term_count/status 중 값이 있는 것만
+// " · "로 이어붙인다. 값이 없는 필드(예: 위원회 정보가 API에 없는 경우)는 건너뛴다.
+function buildBioLine(profile) {
+  if (!profile) return null
+  const parts = [
+    profile.party,
+    profile.district,
+    profile.committee,
+    profile.term_count ? `${profile.term_count}선` : null,
+    profile.status,
+  ].filter(Boolean)
+  return parts.length > 0 ? parts.join(' · ') : null
+}
+
 function ResultsScreen({ question, memberName, result, onReset }) {
+  const profile = result?.member_profile
+  const bioLine = buildBioLine(profile)
   // url 있는 source의 1-based 인덱스만 "클릭 가능한 각주"로 취급한다.
   const visibleIndexSet = new Set(
     (result?.sources || []).flatMap((s, i) => (s.url ? [i + 1] : []))
@@ -63,19 +79,25 @@ function ResultsScreen({ question, memberName, result, onReset }) {
           {memberName && (
             <div className="profile-card">
               <div className="profile-photo" aria-hidden="true">
-                <svg width="34" height="34" viewBox="0 0 24 24" fill="none">
-                  <circle cx="12" cy="8" r="4" stroke="currentColor" strokeWidth="1.6" />
-                  <path
-                    d="M4 20c0-4 3.6-6.5 8-6.5s8 2.5 8 6.5"
-                    stroke="currentColor"
-                    strokeWidth="1.6"
-                    strokeLinecap="round"
-                  />
-                </svg>
+                {profile?.image_url ? (
+                  <img src={profile.image_url} alt="" />
+                ) : (
+                  <svg width="34" height="34" viewBox="0 0 24 24" fill="none">
+                    <circle cx="12" cy="8" r="4" stroke="currentColor" strokeWidth="1.6" />
+                    <path
+                      d="M4 20c0-4 3.6-6.5 8-6.5s8 2.5 8 6.5"
+                      stroke="currentColor"
+                      strokeWidth="1.6"
+                      strokeLinecap="round"
+                    />
+                  </svg>
+                )}
               </div>
               <div className="profile-body">
-                <div className="profile-name">{memberName}</div>
-                <div className="profile-bio">약력 정보 준비 중 · 국회 공공데이터 연동 예정</div>
+                <div className="profile-name">{profile?.name || memberName}</div>
+                <div className="profile-bio">
+                  {bioLine || '약력 정보 준비 중 · 국회 공공데이터 연동 예정'}
+                </div>
               </div>
             </div>
           )}
