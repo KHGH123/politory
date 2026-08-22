@@ -102,12 +102,19 @@ function App() {
     }
   }
 
-  // 동명이인 후보 카드 선택: 이름 + 정당까지 확정해서 이후 검색이 그 사람으로 특정되게 함
+  // 후보 카드 선택: 이름 + 정당까지 확정해서 이후 검색이 그 사람으로 특정되게 함.
+  // keywordSuggestions가 있으면(동명이인 케이스) 다음 키워드 선택을 기다리고,
+  // 없으면(정책 질문에서 역으로 추천된 의원 카드 케이스) 더 물을 게 없으니
+  // 원래 질문 그대로 바로 조회한다.
   function handleCandidateSelect(candidate) {
     setMemberName(candidate.name)
     setConfirmedMemberName(candidate.name)
     setConfirmedParty(candidate.party || '')
     setMemberCandidates([])
+
+    if (keywordSuggestions.length === 0) {
+      runQuery(question, candidate.name, candidate.party || null, question)
+    }
   }
 
   // 화면2 → 화면1: 완전히 처음으로
