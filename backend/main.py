@@ -63,6 +63,21 @@ class ClassifyResponse(BaseModel):
     member_candidates: list[MemberCandidate] = []
 
 
+class _ClassifyLLMOutput(BaseModel):
+    """Gemini에게 실제로 채우게 하는 필드만 담는다.
+
+    ClassifyResponse에 member_candidates까지 그대로 response_schema로 넘기면,
+    프롬프트가 그 필드를 채우라고 지시한 적이 없는데도 구조화 출력이 스키마의
+    모든 필드를 채우려 들어서 LLM이 존재하지도 않는 동명이인 후보를 지어내
+    반환하는 문제가 있었다(예: "이재명" 단독 검색에도 candidates 1건이 새어나옴).
+    member_candidates는 오직 아래 classify()의 DB 조회 결과로만 채운다.
+    """
+
+    sufficient: bool
+    member_name: str | None = None
+    keywords: list[KeywordSuggestion] = []
+
+
 # ---- MP(국회의원) BigQuery 조회 공용 모델 ----
 
 class SnsLink(BaseModel):
@@ -174,10 +189,15 @@ def classify(request: ClassifyRequest) -> ClassifyResponse:
         contents=prompt,
         config=genai_types.GenerateContentConfig(
             response_mime_type="application/json",
-            response_schema=ClassifyResponse,
+            response_schema=_ClassifyLLMOutput,
         ),
     )
-    result = ClassifyResponse.model_validate_json(response.text)
+    llm_result = _ClassifyLLMOutput.model_validate_json(response.text)
+    result = ClassifyResponse(
+        sufficient=llm_result.sufficient,
+        member_name=llm_result.member_name,
+        keywords=llm_result.keywords,
+    )
 
     # LLM이 "이 사람이 실존 의원인지"를 자체 판단하게 두지 않고, BigQuery MP
     # 테이블 조회로 확정한다.
