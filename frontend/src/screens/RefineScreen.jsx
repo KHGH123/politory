@@ -44,7 +44,11 @@ function RefineScreen({
 
           {memberCandidates && memberCandidates.length > 0 && (
             <>
-              <label className="field-label">동명이인 — 찾으시는 분을 선택하세요</label>
+              <label className="field-label">
+                {keywordSuggestions.length > 0
+                  ? '동명이인 — 찾으시는 분을 선택하세요'
+                  : '관련 의원 — 조회할 분을 선택하세요'}
+              </label>
               <div className="keyword-grid">
                 {memberCandidates.map((c, i) => (
                   <button
