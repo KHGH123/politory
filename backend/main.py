@@ -93,144 +93,25 @@ _genai_client = genai.Client(
     location=settings.GOOGLE_CLOUD_LOCATION,
 )
 
-# TEMP(더미 데이터 임시 전환)로 지금은 안 쓰지만, 실제 테이블 준비되면 아래 두 함수와
-# 함께 이 클라이언트도 복원한다.
-# _bq_client = bigquery.Client(project=settings.bigquery_project)
+_bq_client = bigquery.Client(project=settings.BIGQUERY_PROJECT)
+_MEMBERS_TABLE = f"{settings.BIGQUERY_PROJECT}.{settings.BIGQUERY_DATASET}.{settings.BIGQUERY_MEMBERS_TABLE}"
 
-# TEMP(더미 데이터 임시 전환): BigQuery assembly 데이터셋의 실제 테이블은
-# BIGQUERY_MEMBERS_TABLE(.env: "MP")이 아니라 "legislators"이고, 그 컬럼도
-# (legislator_id, party_name, district, term_start/end 등) 아래 MemberProfile이
-# 요구하는 필드(age, gender, image_url, military, criminal, committee, term_count,
-# status, sns)와 겹치는 게 거의 없어 통합 테스트가 막힌 상태였다. 데이터 담당자가
-# "약력 카드"용 실제 테이블을 채울 때까지, 함수 시그니처는 그대로 두고 내부만
-# 더미 데이터로 임시 전환해서 backend/frontend 통합 흐름을 계속 검증할 수 있게 한다.
-# 실제 테이블이 준비되면 이 두 함수 본문을 BigQuery 쿼리로 되돌리면 된다
-# (git blame으로 이 커밋 이전 버전 참고).
-_DUMMY_MEMBERS: dict[str, MemberProfile] = {
-    "홍길동": MemberProfile(
-        name="홍길동",
-        age=55,
-        party="더불어민주당",
-        gender="남",
-        image_url=None,
-        military="예비역 병장",
-        criminal="없음",
-        committee="국토교통위원회",
-        district="서울 강남구갑",
-        term_count=3,
-        status="현직",
-        sns=[SnsLink(platform="twitter", url="https://twitter.com/example")],
-    ),
-    # 아래 두 명은 22대 국회 실존 의원(맹성규는 CLAUDE.md MVP 스코프인 국토교통위원회
-    # 위원장, 서범수는 여야 균형을 위해 추가한 국민의힘 의원 — 행정안전위원회 소속).
-    # 정당/지역구/위원회/선수/재직상태는 공개된 사실을 웹 검색으로 확인해 반영했고,
-    # 나이·병역·전과처럼 개인을 특정해 부정확하면 문제가 될 수 있는 필드는 확인하지
-    # 않은 채로 채우지 않고 None으로 비워둔다. speech/action_info는 여전히
-    # speech_agent/action_agent(tools=[])가 만드는 값이라 이 두 실존 인물에
-    # 대해서도 hallucination이 섞일 수 있다는 걸 감안하고 테스트할 것.
-    "맹성규": MemberProfile(
-        name="맹성규",
-        age=None,
-        party="더불어민주당",
-        gender="남",
-        image_url=None,
-        military=None,
-        criminal=None,
-        committee="국토교통위원회(위원장)",
-        district="인천 남동구갑",
-        term_count=3,
-        status="현직",
-        sns=[],
-    ),
-    "서범수": MemberProfile(
-        name="서범수",
-        age=None,
-        party="국민의힘",
-        gender="남",
-        image_url=None,
-        military=None,
-        criminal=None,
-        committee="행정안전위원회",
-        district="울산 울주군",
-        term_count=2,
-        status="현직",
-        sns=[],
-    ),
-    # 아래는 "이재명 대통령 관련 발언·행동 방향성"이라는 서비스 취지(사용자가
-    # 처음부터 반복해서 강조한 방향)와 맞닿아 있는 여야 주요 인물들로 추가.
-    # 정당/지역구/위원회/선수/재직상태만 공개된 사실로 채우고, age/military/
-    # criminal은 위와 같은 이유로 확인하지 않은 채 None으로 비워둔다.
-    "박찬대": MemberProfile(
-        name="박찬대",
-        age=None,
-        party="더불어민주당",
-        gender="남",
-        image_url=None,
-        military=None,
-        criminal=None,
-        committee="원내대표",
-        district="인천 연수구갑",
-        term_count=3,
-        status="현직",
-        sns=[],
-    ),
-    "정청래": MemberProfile(
-        name="정청래",
-        age=None,
-        party="더불어민주당",
-        gender="남",
-        image_url=None,
-        military=None,
-        criminal=None,
-        committee="당대표",
-        district="서울 마포구을",
-        term_count=5,
-        status="현직",
-        sns=[],
-    ),
-    "장동혁": MemberProfile(
-        name="장동혁",
-        age=None,
-        party="국민의힘",
-        gender="남",
-        image_url=None,
-        military=None,
-        criminal=None,
-        committee="당대표",
-        district="충남 보령시서천군",
-        term_count=1,
-        status="현직",
-        sns=[],
-    ),
-    "권성동": MemberProfile(
-        name="권성동",
-        age=None,
-        party="국민의힘",
-        gender="남",
-        image_url=None,
-        military=None,
-        criminal=None,
-        committee="법제사법위원회",
-        district="강원 강릉시",
-        term_count=5,
-        status="현직",
-        sns=[],
-    ),
-    "박수민": MemberProfile(
-        name="박수민",
-        age=None,
-        party="국민의힘",
-        gender="남",
-        image_url=None,
-        military=None,
-        criminal=None,
-        committee="원내대변인",
-        district="서울 강동구갑",
-        term_count=1,
-        status="현직",
-        sns=[],
-    ),
-}
+
+def _row_to_profile(row: bigquery.table.Row) -> MemberProfile:
+    return MemberProfile(
+        name=row.name,
+        age=row.age,
+        party=row.party,
+        gender=row.gender,
+        image_url=row.image_url,
+        military=row.military,
+        criminal=row.criminal,
+        committee=row.committee,
+        district=row.district,
+        term_count=row.term_count,
+        status=row.status,
+        sns=[SnsLink(platform=s["platform"], url=s["url"]) for s in (row.sns or [])],
+    )
 
 
 def _find_members_by_name(name: str) -> list[MemberCandidate]:
@@ -239,10 +120,16 @@ def _find_members_by_name(name: str) -> list[MemberCandidate]:
     LLM이 스스로 '이 사람이 진짜 의원인지'를 판단하면 신뢰도가 들쭉날쭉해서
     (예: 유명인은 맞히고 아니면 틀림) DB 조회로 확정한다.
     """
-    profile = _DUMMY_MEMBERS.get(name)
-    if not profile:
-        return []
-    return [MemberCandidate(name=profile.name, party=profile.party, image_url=profile.image_url)]
+    job = _bq_client.query(
+        f"SELECT name, party, image_url FROM `{_MEMBERS_TABLE}` WHERE name = @name",
+        job_config=bigquery.QueryJobConfig(
+            query_parameters=[bigquery.ScalarQueryParameter("name", "STRING", name)]
+        ),
+    )
+    return [
+        MemberCandidate(name=row.name, party=row.party, image_url=row.image_url)
+        for row in job.result()
+    ]
 
 
 def _get_member_profile(name: str, party: str | None = None) -> MemberProfile | None:
@@ -250,12 +137,16 @@ def _get_member_profile(name: str, party: str | None = None) -> MemberProfile | 
 
     동명이인이 있을 수 있어 party가 주어지면 그것까지 같이 필터링해 특정한다.
     """
-    profile = _DUMMY_MEMBERS.get(name)
-    if not profile:
-        return None
-    if party and profile.party != party:
-        return None
-    return profile
+    query = f"SELECT * FROM `{_MEMBERS_TABLE}` WHERE name = @name"
+    params = [bigquery.ScalarQueryParameter("name", "STRING", name)]
+    if party:
+        query += " AND party = @party"
+        params.append(bigquery.ScalarQueryParameter("party", "STRING", party))
+    query += " LIMIT 1"
+
+    job = _bq_client.query(query, job_config=bigquery.QueryJobConfig(query_parameters=params))
+    rows = list(job.result())
+    return _row_to_profile(rows[0]) if rows else None
 
 
 @app.post("/api/classify", response_model=ClassifyResponse)
