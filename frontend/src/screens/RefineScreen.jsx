@@ -13,7 +13,12 @@ function RefineScreen({
   onReset,
   loading,
   error,
+  memberResolved,
 }) {
+  // 동명이인 후보도 없고 이미 인물이 특정된 상태(memberResolved)면, 다시 이름을
+  // 입력받을 필요가 없다 — 입력창 없이 키워드 카드만 바로 보여준다.
+  const showNameInput = !memberResolved || (memberCandidates && memberCandidates.length > 0)
+
   return (
     <div className="page is-landing">
       <button type="button" className="back-link" onClick={onReset}>
@@ -28,19 +33,23 @@ function RefineScreen({
         </div>
 
         <form className="refine" onSubmit={onSubmit}>
-          <label className="field-label" htmlFor="refine-target">
-            특정인 / 정책
-          </label>
-          <input
-            id="refine-target"
-            type="text"
-            className="refine-field"
-            placeholder="예: 김OO 의원"
-            value={memberName}
-            onChange={(e) => onMemberNameChange(e.target.value)}
-            disabled={loading}
-            autoFocus
-          />
+          {showNameInput && (
+            <>
+              <label className="field-label" htmlFor="refine-target">
+                특정인 / 정책
+              </label>
+              <input
+                id="refine-target"
+                type="text"
+                className="refine-field"
+                placeholder="예: 김OO 의원"
+                value={memberName}
+                onChange={(e) => onMemberNameChange(e.target.value)}
+                disabled={loading}
+                autoFocus
+              />
+            </>
+          )}
 
           {memberCandidates && memberCandidates.length > 0 && (
             <>

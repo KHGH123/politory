@@ -158,6 +158,7 @@ function App() {
         memberCandidates={memberCandidates}
         onCandidateSelect={handleCandidateSelect}
         keywordSuggestions={keywordSuggestions}
+        memberResolved={Boolean(confirmedMemberName)}
         onSubmit={(e) => {
           e.preventDefault()
           runQuery(memberName, confirmedMemberName || null, confirmedParty || null, memberName)
