@@ -27,6 +27,13 @@ class Settings(BaseSettings):
     # 저장소
     SQLITE_PATH: str = "./db/uijeonggirok.sqlite3"
 
+    # BigQuery (국회의원/법안/발언 데이터)
+    BIGQUERY_PROJECT: str = ""
+    BIGQUERY_DATASET: str = ""
+    BIGQUERY_MEMBERS_TABLE: str = ""
+    BIGQUERY_BILLS_TABLE: str = ""
+    BIGQUERY_SPEECHES_TABLE: str = ""
+
     # Vertex AI Search (RAG)
     SEARCH_APP_ID: str = ""
 

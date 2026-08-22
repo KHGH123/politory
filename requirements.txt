@@ -11,8 +11,9 @@ uvicorn[standard]
 # --- 에이전트 (agent/) ---
 google-adk==2.7.1
 
-# --- 정형 데이터 (db/) ---
+# --- 정형 데이터 (db/, pipeline/) ---
 # sqlite3는 파이썬 표준 라이브러리 포함, 별도 설치 불필요
+google-cloud-bigquery==3.43.0
 
 # --- 벡터DB / 검색 (rag/) ---
 # RAG는 로컬 Chroma 대신 Vertex AI Search(데이터스토어 + VertexAiSearchTool)로 결정.
