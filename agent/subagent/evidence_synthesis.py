@@ -39,9 +39,11 @@ speech_agent가 tools=[] 상태라 지어낸 내용인데도 프론트가 이미
 없이 순수 프론트 레벨 — frontend/src/screens/ResultsScreen.jsx의 url 필터).
 """
 import os
+import re
 from typing import Literal, Optional
 
 from google.adk.agents import Agent, SequentialAgent
+from google.adk.agents.callback_context import CallbackContext
 from google.genai import types
 from pydantic import BaseModel
 
@@ -127,8 +129,15 @@ merge = Agent(
       "완결된" 문장만 골라 한 글자도 바꾸지 말고 그대로 옮겨라(요약·의역·재구성
       금지). 뉴스 검색 결과는 마지막 부분이 "..."로 잘려 있는 경우가 많다 —
       잘린 문장은 절대 옮기지 마라. 따옴표로 묶인 직접 발언이 완결된 형태로
-      있으면 그 부분을 우선 골라라. 완결된 발언 인용이 없으면 완결된 서술
-      문장을 최대 2문장 옮긴다. 이 필드는 "정확히 원문에 있던, 그리고 문장이
+      있으면 그 부분을 우선 골라라 — 이때 따옴표 앞뒤의 서술("~라고 말했다",
+      "~라며 밝혔다" 등)은 원문 그대로가 아니면 아예 붙이지 말고 따옴표 안
+      인용문만 옮겨라(예: 원문이 "...오세훈 서울시장을 향해 "공급을 늘리자는
+      것이지, 집값을 폭등시킬 가능성을 높여서는 안 된다"고 직접 반박하며..."
+      라면, excerpt는 "공급을 늘리자는 것이지, 집값을 폭등시킬 가능성을
+      높여서는 안 된다"까지만 — 원문 서술을 "~라고 말했습니다"처럼 네가
+      새로 만든 표현으로 바꾸면 excerpt 전체가 검증 단계에서 통째로
+      제거된다). 완결된 발언 인용이 없으면 완결된 서술 문장을 최대 2문장
+      원문 그대로 옮긴다. 이 필드는 "정확히 원문에 있던, 그리고 문장이
       끝까지 있는" 표현이어야 하므로, 네가 표현을 다듬거나 발언체로 재구성하면
       안 되고, 원문 자체가 끊긴 부분을 이어 붙이거나 완성해서도 안 된다.
       완결된 문장이 하나도 없으면 null로 둬라.
@@ -187,8 +196,68 @@ guardrail = Agent(
     output_key="final_answer",
 )
 
+
+# excerpt는 "원문을 한 글자도 안 바꾸고 그대로 옮겨라"라고 merge instruction에
+# 명시했는데도 실측으로 위반 사례가 나왔다(실제 원문 "...오락가락한다는 생각은
+# 안 했으면 좋겠다"를 "오락가락하는 것이 아니라 정교하게 다듬는 과정"으로
+# 재구성 — 취지는 비슷하지만 문장 자체가 달랐다). LLM instruction만으로는
+# 재구성을 완전히 막지 못하는 걸 확인했으므로, guardrail 이후 순수 파이썬
+# 문자열 대조로 한 번 더 검증한다. LLM 호출 없이 문자열 비교만 하므로
+# 파이프라인 속도에 미치는 영향은 사실상 없다(수 ms 수준).
+_WHITESPACE_PATTERN = re.compile(r"\s+")
+
+
+def _normalize_for_match(text: str) -> str:
+    """공백 차이만 흡수하고 나머지는 원문 그대로 비교한다.
+
+    구두점·어미까지 느슨하게 허용하면 "재구성"을 다시 통과시켜버릴 위험이
+    있으므로, 정규화는 연속 공백을 하나로 줄이는 정도로만 제한한다.
+    """
+    return _WHITESPACE_PATTERN.sub(" ", text).strip()
+
+
+def _verify_excerpts(callback_context: CallbackContext) -> None:
+    """final_answer의 각 source.excerpt가 실제 원문(context_info 등)에 부분
+    문자열로 포함되는지 검증한다. 포함되지 않으면(=merge가 재구성했다는 뜻)
+    excerpt만 null로 비운다 — sources 항목 자체나 answer의 각주는 건드리지
+    않는다(excerpt는 Optional이라 이미 null인 경우도 정상 상태이고, description은
+    애초에 "요약"이라는 게 명시적이라 재구성이어도 문제가 아니다).
+
+    after_agent_callback은 반환값이 None이면 에이전트의 원래 출력을 그대로
+    쓰므로, 여기서는 state를 직접 수정하고 None을 반환한다(source_verification.py의
+    _record_search_news_urls와 같은 패턴).
+    """
+    raw = callback_context.state.get("final_answer")
+    if not raw:
+        return None
+
+    response = raw if isinstance(raw, AgentResponse) else AgentResponse.model_validate(raw)
+    if not response.sources:
+        return None
+
+    source_texts = [
+        callback_context.state.get(key) or ""
+        for key in ("context_info", "speech_info", "action_info")
+    ]
+    combined = _normalize_for_match(" ".join(source_texts))
+
+    changed = False
+    for source in response.sources:
+        if not source.excerpt:
+            continue
+        if _normalize_for_match(source.excerpt) not in combined:
+            source.excerpt = None
+            changed = True
+
+    if changed:
+        callback_context.state["final_answer"] = response.model_dump()
+    return None
+
+
+guardrail.after_agent_callback = _verify_excerpts
+
 evidence_synthesis = SequentialAgent(
     name="evidence_synthesis",
-    description="근거를 응답 스키마로 종합하는(merge) 후 answer의 해석적 판단 문장만 검사·제거하는(guardrail) 2단계 파이프라인.",
+    description="근거를 응답 스키마로 종합하는(merge) 후 answer의 해석적 판단 문장만 검사·제거하고(guardrail) excerpt 원문 일치 여부를 파이썬으로 재검증하는 파이프라인.",
     sub_agents=[merge, guardrail],
 )
