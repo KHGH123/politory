@@ -300,6 +300,22 @@ body {
   color: var(--navy);
   margin-bottom: 18px;
 }
+.sort-toggle {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  letter-spacing: 0.04em;
+  color: var(--brass);
+  background: none;
+  border: 1px solid var(--brass);
+  border-radius: 3px;
+  padding: 3px 9px;
+  cursor: pointer;
+  text-transform: none;
+}
+.sort-toggle:hover {
+  background: var(--brass);
+  color: #fff;
+}
 
 /* Profile header (results top) */
 .profile-card {
