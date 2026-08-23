@@ -1,3 +1,5 @@
+import { useState } from 'react'
+
 const SOURCE_LABEL = {
   primary: '1차 · 회의록 원문',
   secondary: '2차 · 뉴스 보도',
@@ -50,10 +52,19 @@ function buildProfileRows(profile) {
 function ResultsScreen({ question, memberName, result, onReset }) {
   const profile = result?.member_profile
   const profileRows = buildProfileRows(profile)
+  const [timelineDesc, setTimelineDesc] = useState(false)
   // url 있는 source의 1-based 인덱스만 "클릭 가능한 각주"로 취급한다.
   const visibleIndexSet = new Set(
     (result?.sources || []).flatMap((s, i) => (s.url ? [i + 1] : []))
   )
+  // 백엔드가 이미 과거->최신 순으로 정렬해서 준다. 각주 [1][2]는 이 원래
+  // 순서(1-based)를 가리키므로, 정렬을 바꿔도 originalIndex는 그대로 보존해
+  // id="source-{n}"와 각주 번호가 화면 표시 순서와 무관하게 유지되게 한다.
+  const indexedSources = (result?.sources || []).map((source, i) => ({
+    source,
+    originalIndex: i,
+  }))
+  const displaySources = timelineDesc ? [...indexedSources].reverse() : indexedSources
 
   function scrollToSource(index) {
     // 각주는 1-based, sources 배열 순서와 동일하다고 merge가 보장한다.
@@ -122,30 +133,40 @@ function ResultsScreen({ question, memberName, result, onReset }) {
             <div className="q">Q. {question}</div>
             {renderAnswerWithFootnotes(result.answer, scrollToSource, visibleIndexSet)}
             <div className="disclaimer">
-              ⚠ 이 답변은 원문 검색 결과를 시간순으로 정리한 것이며, 해석적 판단(입장 변화 등)을 포함하지 않습니다.
-              최종 판단은 원문을 직접 확인해주세요.
+              ⚠ 이 답변은 해석적 판단(입장 변화 등)을 포함하지 않습니다. 최종 판단은 원문을 직접 확인해주세요.
             </div>
           </div>
 
           {result.sources && result.sources.filter((s) => s.url).length > 0 && (
             <>
-              <div className="section-label" style={{ marginTop: 44 }}>
-                Timeline
+              <div
+                className="section-label"
+                style={{ marginTop: 44, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
+              >
+                <span>Timeline</span>
+                <button
+                  type="button"
+                  className="sort-toggle"
+                  onClick={() => setTimelineDesc((prev) => !prev)}
+                >
+                  {timelineDesc ? '최신순 ↓' : '오래된순 ↑'}
+                </button>
               </div>
               <div className="section-title">발언 · 출처</div>
               <div className="timeline">
-                {result.sources.map((source, i) => {
+                {displaySources.map(({ source, originalIndex }) => {
                   // url 없는 항목은 화면에서 숨긴다 — action_agent가 아직 tools
                   // 미연결(hallucination 가능) 상태라, url 없는 근거는 실제
                   // 검색된 문서가 아니라 지어낸 내용일 가능성이 높다. 각주 번호는
-                  // answer가 sources의 원래 1-based 인덱스를 참조하므로, 숨기더라도
-                  // 번호(i + 1)는 그대로 유지해야 [1], [4] 같은 참조가 깨지지 않는다.
+                  // answer가 sources의 원래 1-based 인덱스를 참조하므로, 정렬
+                  // 순서를 바꾸거나 숨기더라도 번호(originalIndex + 1)는 그대로
+                  // 유지해야 [1], [4] 같은 참조가 깨지지 않는다.
                   if (!source.url) return null
                   return (
-                    <div className="t-item" key={i}>
+                    <div className="t-item" key={originalIndex}>
                       {source.date && <div className="t-date">{source.date}</div>}
-                      <div className="t-card" id={`source-${i + 1}`}>
-                        <div className="t-index">[{i + 1}]</div>
+                      <div className="t-card" id={`source-${originalIndex + 1}`}>
+                        <div className="t-index">[{originalIndex + 1}]</div>
                         <div className="t-quote">{source.title}</div>
                         {source.description && (
                           <div className="t-summary">{source.description}</div>

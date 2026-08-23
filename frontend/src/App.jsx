@@ -194,7 +194,12 @@ function App() {
           }
         }}
         onKeywordClick={(kw) =>
-          runQuery(memberName, confirmedMemberName || null, confirmedParty || null, kw)
+          // effectiveQuestion에 memberName만 넘기면 화면3의 "Q. {question}"이
+          // 사용자가 화면1에 실제로 입력한 원본 질문이 아니라 인물명만 뜨는
+          // 버그가 있었다. 원본은 question state에 그대로 남아있으므로(화면2
+          // 진입 시 memberName/confirmedMemberName 등만 갱신되고 question은
+          // 안 건드림) 그걸 그대로 쓴다 — handleCandidateSelect와 동일한 패턴.
+          runQuery(question, confirmedMemberName || null, confirmedParty || null, kw)
         }
         onReset={handleBackToLanding}
         loading={loading}
