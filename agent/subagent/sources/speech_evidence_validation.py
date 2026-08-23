@@ -84,6 +84,20 @@ def validate_speech_info(
         if source is None:
             return False, f"근거 {index}의 발언 ID가 실제 MCP 조회 결과에 없다."
 
+        # legislator_id가 없는 발언(국회의원이 아닌 진술인·정부 관계자 등)을
+        # 이름만 비슷해 보인다고 채택하면 동명이인 오검증으로 이어진다(실측 확인:
+        # "김민수 의원"으로 물었을 때 대한의사협회 진술인 "김민수"의 발언을
+        # 근거로 쓴 사례). 회의록 화자 식별이 안 된 발언은 결과적으로 어떤
+        # 국회의원 발언인지 보장할 수 없으므로 여기서 결정적으로 차단한다.
+        legislator_id = source.get("legislator_id")
+        if not isinstance(legislator_id, str) or not legislator_id.strip():
+            return False, (
+                f"근거 {index}({item.get('speaker_name')})는 legislator_id가 없어 "
+                "국회의원 발언인지 확인되지 않는다. 국회의원이 아닌 진술인·정부"
+                " 관계자 발언일 수 있으니 제외하고, legislator_id가 채워진"
+                " 결과만 다시 채택하라."
+            )
+
         quote = item.get("quote")
         source_text = source.get("utterance_text")
         if not isinstance(quote, str) or not quote.strip():

@@ -122,6 +122,13 @@ merge = Agent(
       번호는 sources 배열에 그 항목이 실제로 나타나는 순서와 반드시 일치해야
       한다. 여러 근거를 종합한 문장이면 "[1][2]"처럼 여러 번호를 붙여도 된다.
       근거 없이 서술만 하는 문장(예: 도입부 요약)에는 각주를 붙이지 마라.
+      각주를 붙이기 전에 반드시 그 sources[번호-1]의 excerpt 또는 description을
+      다시 읽고, 지금 쓰려는 문장의 핵심 주장(누가 무엇을 했다는 사실)이 그
+      excerpt/description에 실제로 담겨 있는지 확인하라 — 순서상 가까운
+      번호나 이미 쓴 번호를 습관적으로 재사용하지 마라(실측 사례: "법안을
+      대표 발의했다"는 문장에 법안 처리 지연을 다룬 무관한 기사 번호가
+      잘못 붙은 적이 있다). 한 문장에 여러 사실이 섞여 있으면 문장을 나누고
+      각각 맞는 번호를 붙여라.
 
     sources 필드:
     - action_info/speech_info에서 인용한 근거는 type="primary", context_info에서
@@ -209,6 +216,7 @@ guardrail = Agent(
 # 문자열 대조로 한 번 더 검증한다. LLM 호출 없이 문자열 비교만 하므로
 # 파이프라인 속도에 미치는 영향은 사실상 없다(수 ms 수준).
 _WHITESPACE_PATTERN = re.compile(r"\s+")
+_FOOTNOTE_PATTERN = re.compile(r"\[(\d+)\]")
 
 
 def _normalize_for_match(text: str) -> str:
@@ -258,7 +266,41 @@ def _verify_excerpts(callback_context: CallbackContext) -> None:
     return None
 
 
-guardrail.after_agent_callback = _verify_excerpts
+# LLM instruction("각주 번호는 sources 순서와 일치")만으로는 완전히 보장되지
+# 않는 걸 실측으로 확인했다 — 동일 입력을 3회 반복 실행했을 때 1회는 문장의
+# 핵심 주장과 무관한 sources 번호가 각주로 붙었다(예: "법안을 대표 발의했다"는
+# 문장에 법안 처리 지연 기사 번호가 붙음). 문장이 실제로 그 sources[i]를
+# 요약한 것인지 의미적으로 판단하려면 LLM 재검증이 필요한데, 이는 응답
+# 시간을 늘리는 방향이라 이 단계에서는 하지 않는다. 대신 결정적으로 잡을 수
+# 있는 것만 파이썬으로 검사한다: sources 배열 범위를 벗어난 각주 번호
+# (예: sources가 3개인데 [5]를 인용) — 이건 항상 명백한 오류이므로 발견하면
+# 안전하게 각주 표시만 제거한다(문장 자체나 sources는 건드리지 않는다,
+# _verify_excerpts와 같은 보수적 정책).
+def _verify_footnotes(callback_context: CallbackContext) -> None:
+    raw = callback_context.state.get("final_answer")
+    if not raw:
+        return None
+
+    response = raw if isinstance(raw, AgentResponse) else AgentResponse.model_validate(raw)
+    if not response.answer:
+        return None
+
+    max_index = len(response.sources)
+
+    def _strip_invalid(match: re.Match) -> str:
+        number = int(match.group(1))
+        if 1 <= number <= max_index:
+            return match.group(0)
+        return ""
+
+    fixed_answer = _FOOTNOTE_PATTERN.sub(_strip_invalid, response.answer)
+    if fixed_answer != response.answer:
+        response.answer = fixed_answer
+        callback_context.state["final_answer"] = response.model_dump()
+    return None
+
+
+guardrail.after_agent_callback = [_verify_excerpts, _verify_footnotes]
 
 evidence_synthesis = SequentialAgent(
     name="evidence_synthesis",

@@ -43,6 +43,17 @@ _model = os.getenv("MODEL", "gemini-3.5-flash")
 
 MAX_VERIFICATION_ITERATIONS = 2
 
+# evidence_synthesis.py의 merge/guardrail에서 thinking을 끄면 응답 시간이
+# 단계당 약 1/3로 줄고 검증 품질 저하는 없었다는 실측이 있는데, 이 verifier들
+# (speech/action/context)에는 그 최적화가 빠져 있었다 — exit_loop 호출
+# 여부만 판단하는 단순 분류 작업이라 query_processing과 성격이 같으므로
+# 동일하게 적용한다. 전체 파이프라인이 최대 2회씩 도는 LoopAgent 3개를
+# 병렬로 포함하므로, verifier 1회 호출 단축분이 전체 응답 시간에 그대로
+# 곱해진다.
+_no_thinking_config = types.GenerateContentConfig(
+    thinking_config=types.ThinkingConfig(thinking_budget=0),
+)
+
 _URL_PATTERN = re.compile(r"https?://[^\s\)\]\"'>]+")
 
 
@@ -168,6 +179,7 @@ def _make_verifier(
     return Agent(
         name=name,
         model=_model,
+        generate_content_config=_no_thinking_config,
         tools=[exit_loop],
         instruction=f"""
         아래는 소스 에이전트가 만든 결과다.
