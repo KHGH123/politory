@@ -84,6 +84,7 @@ function App() {
   // (원래 화면1 질문을 그대로 쓰면 화면2에서 고친 내용이 무시되는 버그가 있었음)
   async function runQuery(effectiveQuestion, memberNameValue, partyValue, keywordValue) {
     setQuestion(effectiveQuestion)
+    if (memberNameValue) setMemberName(memberNameValue)
     setLoading(true)
     setError(null)
     setResult(null)

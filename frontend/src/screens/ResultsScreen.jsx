@@ -72,14 +72,14 @@ function ResultsScreen({ question, memberName, result, onReset }) {
 
       <div className="masthead">
         <div className="logo">
-          의정기록<span>.</span>
+          Politory<span>.</span>
         </div>
         <div className="tag">국회의원 통합 의정활동 조회</div>
       </div>
 
       {result && (
         <>
-          {memberName && (
+          {(profile || memberName) && (
             <div className="profile-card profile-card-id">
               <div className="profile-id-block">
                 <div className="profile-photo profile-photo-large" aria-hidden="true">
@@ -171,7 +171,7 @@ function ResultsScreen({ question, memberName, result, onReset }) {
         </>
       )}
 
-      <footer>의정기록 · 국회 공공데이터 기반 프로토타입</footer>
+      <footer>Politory · 국회 공공데이터 기반 프로토타입</footer>
     </div>
   )
 }
