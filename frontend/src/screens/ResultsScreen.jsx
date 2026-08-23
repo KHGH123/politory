@@ -49,7 +49,7 @@ function buildProfileRows(profile) {
   ].filter((row) => row.value)
 }
 
-function ResultsScreen({ question, memberName, result, onReset }) {
+function ResultsScreen({ question, result, onReset }) {
   const profile = result?.member_profile
   const profileRows = buildProfileRows(profile)
   const [timelineDesc, setTimelineDesc] = useState(false)
@@ -90,11 +90,17 @@ function ResultsScreen({ question, memberName, result, onReset }) {
 
       {result && (
         <>
-          {(profile || memberName) && (
+          {/* profile은 /api/query가 BigQuery mps 테이블에서 실제로 조회에
+              성공했을 때만 채워진다(member_name이 DB에 없으면 백엔드가 애초에
+              404를 낸다). memberName(화면 입력 텍스트)을 폴백으로 같이 쓰면
+              등록되지 않은 이름(예: "윤석열")도 그럴듯한 인물 카드처럼
+              보여버리는 문제가 있었다 — 검색축은 반드시 등록된 국회의원이어야
+              한다는 원칙에 따라 실제 조회된 profile이 있을 때만 카드를 그린다. */}
+          {profile && (
             <div className="profile-card profile-card-id">
               <div className="profile-id-block">
                 <div className="profile-photo profile-photo-large" aria-hidden="true">
-                  {profile?.image_url ? (
+                  {profile.image_url ? (
                     <img src={profile.image_url} alt="" />
                   ) : (
                     <svg width="40" height="40" viewBox="0 0 24 24" fill="none">
@@ -108,8 +114,8 @@ function ResultsScreen({ question, memberName, result, onReset }) {
                     </svg>
                   )}
                 </div>
-                <div className="profile-name">{profile?.name || memberName}</div>
-                <div className="profile-party">{profile?.party || '정당 정보 없음'}</div>
+                <div className="profile-name">{profile.name}</div>
+                <div className="profile-party">{profile.party || '정당 정보 없음'}</div>
               </div>
 
               <div className="profile-detail-rows">
