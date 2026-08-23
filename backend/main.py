@@ -198,6 +198,9 @@ def classify(request: ClassifyRequest) -> ClassifyResponse:
     부족하면 관련 키워드 후보 최대 3개를 이유와 함께 추천해서
     프론트가 화면2(키워드 선택)를 보여줄 수 있게 한다.
     """
+    if not request.question.strip():
+        raise HTTPException(status_code=400, detail="질문을 입력해주세요.")
+
     prompt = f"""사용자 질문: "{request.question}"
 
 이 질문에서 국회의원 이름으로 보이는 고유명사가 있으면 정당명·직함(대표, 원내대표 등)을
@@ -389,6 +392,14 @@ def _source_sort_key(source: AgentSource) -> tuple[int, date]:
 
 @app.post("/api/query", response_model=QueryResponse)
 async def query(request: QueryRequest) -> QueryResponse:
+    # 프론트는 빈 질문을 제출 전에 막지만(App.jsx classifyAndRoute), 이
+    # 엔드포인트는 그 검증을 거치지 않고 직접 호출될 수 있다(예: 화면2에서
+    # /api/classify 없이 바로 여기로 오는 경로, 또는 API 직접 호출). 빈
+    # question을 그대로 에이전트에 넘기면 query_processing/context_agent가
+    # 질문 없이도 아무 정치 이슈나 지어내 답하는 걸 실측으로 확인했다(P-04).
+    if not request.question.strip():
+        raise HTTPException(status_code=400, detail="질문을 입력해주세요.")
+
     profile = (
         _get_member_profile(request.member_name, request.party) if request.member_name else None
     )
