@@ -74,3 +74,26 @@ def get_utterances(utterance_ids: list[str]) -> list[dict]:
     ).result()
 
     return [dict(row.items()) for row in rows]
+
+
+def get_meeting_sources(meeting_ids: list[str]) -> dict[str, dict]:
+    """회의 ID별 공식 회의록 제목과 공개 PDF URL을 반환한다."""
+    if not meeting_ids:
+        return {}
+
+    query = f"""
+        SELECT
+            meeting_id,
+            title AS meeting_title,
+            official_url,
+            pdf_url AS source_pdf_url
+        FROM `{BQ_PROJECT_ID}.{BQ_DATASET}.meetings`
+        WHERE meeting_id IN UNNEST(@meeting_ids)
+    """
+    job_config = bigquery.QueryJobConfig(
+        query_parameters=[
+            bigquery.ArrayQueryParameter("meeting_ids", "STRING", meeting_ids)
+        ]
+    )
+    rows = client.query(query, job_config=job_config).result()
+    return {row["meeting_id"]: dict(row.items()) for row in rows}
