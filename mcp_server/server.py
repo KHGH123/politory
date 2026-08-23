@@ -3,14 +3,23 @@ import os
 from fastmcp import FastMCP
 
 from rag.bigquery_client import (
+    get_meeting_sources as get_meeting_sources_impl,
     resolve_legislator as resolve_legislator_impl,
     get_utterances as get_utterances_impl,
 )
-from rag.search_client import search_speeches as search_speeches_impl
+from rag.search_client import (
+    search_speeches as search_speeches_impl,
+    search_votes as search_votes_impl,
+)
 from rag.retriever import retrieve_speech_evidence as retrieve_speech_evidence_impl
 
 
 mcp = FastMCP("mcp")
+
+
+def _filter_value(value: str) -> str:
+    """Discovery Engine filter 문자열에 들어갈 값을 escape한다."""
+    return value.replace("\\", "\\\\").replace('"', '\\"')
 
 
 @mcp.tool()
@@ -40,6 +49,74 @@ def search_speeches(
         page_size=page_size,
         filter_=filter_,
     )
+
+
+@mcp.tool()
+def search_votes(
+    query: str,
+    member_name: str | None = None,
+    legislator_id: str | None = None,
+    choice: str | None = None,
+    page_size: int = 10,
+) -> list[dict]:
+    """국회 본회의 표결을 검색하고 공식 회의록 출처와 함께 반환합니다.
+
+    의원을 지정하지 않은 안건 결과 질문에는 안건별 집계 문서를 반환합니다.
+    의원명, 의원 ID 또는 표결 선택을 지정하면 의원별 표결 문서를 검색합니다.
+
+    Args:
+        query: 의안명 또는 표결 주제.
+        member_name: 특정 의원 이름.
+        legislator_id: 동명이인을 구분하는 정규화 의원 ID.
+        choice: YES(찬성), NO(반대), ABSTAIN(기권) 중 하나.
+        page_size: 반환할 최대 결과 수(1~20).
+    """
+    if not query.strip():
+        return []
+
+    normalized_choice = choice.upper() if choice else None
+    if normalized_choice and normalized_choice not in {"YES", "NO", "ABSTAIN"}:
+        raise ValueError("choice는 YES, NO, ABSTAIN 중 하나여야 합니다.")
+
+    member_scope = bool(member_name or legislator_id or normalized_choice)
+    document_type = (
+        "assembly_vote_member" if member_scope else "assembly_vote_summary"
+    )
+    filters = [f'document_type: ANY("{document_type}")']
+    if member_name:
+        filters.append(f'member_name: ANY("{_filter_value(member_name)}")')
+    if legislator_id:
+        filters.append(f'legislator_id: ANY("{_filter_value(legislator_id)}")')
+    if normalized_choice:
+        filters.append(f'choice: ANY("{normalized_choice}")')
+    if member_scope:
+        filters.append('identity_status: ANY("MATCHED")')
+
+    search_results = search_votes_impl(
+        query=query.strip(),
+        page_size=max(1, min(page_size, 20)),
+        filter_=" AND ".join(filters),
+    )
+    evidence = []
+    for result in search_results:
+        data = dict(result.get("data", {}))
+        if member_name and data.get("member_name") != member_name:
+            continue
+        data["document_id"] = result.get("id")
+        evidence.append(data)
+
+    meeting_ids = list(
+        dict.fromkeys(
+            item.get("meeting_id") for item in evidence if item.get("meeting_id")
+        )
+    )
+    meeting_sources = get_meeting_sources_impl(meeting_ids)
+    for item in evidence:
+        source = meeting_sources.get(item.get("meeting_id"), {})
+        item["meeting_title"] = source.get("meeting_title")
+        item["official_url"] = source.get("official_url")
+        item["source_pdf_url"] = source.get("source_pdf_url")
+    return evidence
 
 
 @mcp.tool()

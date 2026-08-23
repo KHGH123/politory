@@ -78,6 +78,8 @@ class Source(BaseModel):
     description: Optional[str] = None
     url: Optional[str] = None
     date: Optional[str] = None
+    page_start: Optional[int] = None
+    page_end: Optional[int] = None
 
 
 class AgentResponse(BaseModel):
@@ -146,6 +148,8 @@ merge = Agent(
       "~라고 밝혔다", "~을 촉구했다"처럼 3인칭 서술로 써라(직접 인용처럼
       따옴표를 쓰지 마라 — 그건 excerpt의 역할이다).
     - url, date: 원문에 명시되어 있으면 채우고, 없으면 null로 둬라(추측 금지).
+    - page_start, page_end: action_info 또는 speech_info의 근거에 PDF 페이지가
+      명시되어 있으면 원본 숫자를 그대로 채우고, 없으면 null로 둬라.
     - answer에서 실제로 인용하지 않은 근거는 sources에 넣지 마라. 인용된 근거가
       전혀 없으면 sources는 빈 배열로 둬라.
     """,
