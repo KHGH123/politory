@@ -56,14 +56,24 @@ function App() {
 
       const data = await res.json()
 
+      const candidates = data.member_candidates || []
+      const keywords = data.keywords || []
+
       if (data.sufficient) {
         await runQuery(text, data.member_name, null, '')
+      } else if (!data.member_name && candidates.length === 0 && keywords.length === 0) {
+        // 등록된 국회의원으로도, 관련 상임위 인물로도 전혀 특정하지 못한 경우
+        // (예: 정치인이 아닌 이름) — 화면2로 보내봤자 고를 것도 채울 것도
+        // 없는 빈 화면이라 오히려 뭐가 잘못됐는지 알기 어렵다. 화면 전환 없이
+        // 지금 있던 화면(화면1 또는 화면2)에 바로 에러만 띄운다.
+        setError('등록된 국회의원을 찾지 못했습니다. 이름이나 표현을 다시 확인해주세요.')
+        setLoading(false)
       } else {
         setMemberName(data.member_name || text)
         setConfirmedMemberName(data.member_name || '')
         setConfirmedParty('')
-        setMemberCandidates(data.member_candidates || [])
-        setKeywordSuggestions(data.keywords || [])
+        setMemberCandidates(candidates)
+        setKeywordSuggestions(keywords)
         setStage('refine')
         setLoading(false)
       }
