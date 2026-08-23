@@ -29,11 +29,14 @@ function App() {
   const [error, setError] = useState(null)
   const [result, setResult] = useState(null)
 
-  // 화면1 → 화면2/3 분기: 질문이 충분히 구체적인지는 백엔드(/api/classify)가 판단한다.
-  // (LLM 기반 판단 로직은 백엔드 담당 몫 — 여기선 계약만 맞춰 호출)
-  async function handleSearchSubmit(e) {
-    e.preventDefault()
-    if (!question.trim()) {
+  // 질문 텍스트 하나를 /api/classify에 넣어 화면2/3로 분기한다. 화면1의 최초
+  // 제출뿐 아니라, 화면2의 "특정인/정책" 입력창에 완전히 새 문장을 타이핑해서
+  // 바로 제출하는 경우에도 이 함수를 다시 태워야 한다 — 예전 confirmedMemberName을
+  // 그대로 재사용하면(예: "이재명" 확정 후 화면2에서 "주식 정책 알려줘 홍길동"으로
+  // 바꿔 쳐도 여전히 이재명으로 조회되거나, 애초에 미확정이면 member_name=null로
+  // 나가 화면3 약력 카드가 통째로 비어버리는 버그가 있었다).
+  async function classifyAndRoute(text) {
+    if (!text.trim()) {
       setError('질문을 입력해주세요.')
       return
     }
@@ -44,7 +47,7 @@ function App() {
       const res = await fetch(`${API_BASE_URL}/api/classify`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question }),
+        body: JSON.stringify({ question: text }),
       })
 
       if (!res.ok) {
@@ -54,10 +57,11 @@ function App() {
       const data = await res.json()
 
       if (data.sufficient) {
-        await runQuery(question, data.member_name, null, '')
+        await runQuery(text, data.member_name, null, '')
       } else {
-        setMemberName(data.member_name || question)
+        setMemberName(data.member_name || text)
         setConfirmedMemberName(data.member_name || '')
+        setConfirmedParty('')
         setMemberCandidates(data.member_candidates || [])
         setKeywordSuggestions(data.keywords || [])
         setStage('refine')
@@ -67,6 +71,13 @@ function App() {
       setError(err.message || '요청 중 문제가 발생했습니다.')
       setLoading(false)
     }
+  }
+
+  // 화면1 → 화면2/3 분기: 질문이 충분히 구체적인지는 백엔드(/api/classify)가 판단한다.
+  // (LLM 기반 판단 로직은 백엔드 담당 몫 — 여기선 계약만 맞춰 호출)
+  async function handleSearchSubmit(e) {
+    e.preventDefault()
+    await classifyAndRoute(question)
   }
 
   // effectiveQuestion: 화면2에서 "특정인/정책" 칸을 수정했으면 그 값이 실제 검색어가 되어야 함
@@ -167,7 +178,7 @@ function App() {
         keywordSuggestions={keywordSuggestions}
         onSubmit={(e) => {
           e.preventDefault()
-          runQuery(memberName, confirmedMemberName || null, confirmedParty || null, memberName)
+          classifyAndRoute(memberName)
         }}
         onKeywordClick={(kw) =>
           runQuery(memberName, confirmedMemberName || null, confirmedParty || null, kw)
