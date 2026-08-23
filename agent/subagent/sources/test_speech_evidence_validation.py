@@ -65,6 +65,28 @@ class SpeechEvidenceValidationTest(unittest.TestCase):
         self.assertFalse(valid)
         self.assertIn("다시 검색", reason)
 
+    def test_rejects_evidence_without_legislator_id(self):
+        """국회의원이 아닌 진술인·정부 관계자 발언(legislator_id=None)은
+        이름이 질문 속 의원과 같아 보여도 동명이인일 수 있으므로 거부해야
+        한다 (실측: "김민수 의원" 질문에 대한의사협회 진술인 "김민수"의
+        발언이 근거로 쓰인 사례)."""
+        self.source["u1"]["legislator_id"] = None
+        self.speech_info["evidence"][0]["legislator_id"] = None
+        valid, reason = validation.validate_speech_info(
+            json.dumps(self.speech_info, ensure_ascii=False), self.source
+        )
+        self.assertFalse(valid)
+        self.assertIn("legislator_id", reason)
+
+    def test_rejects_evidence_with_blank_legislator_id(self):
+        self.source["u1"]["legislator_id"] = "   "
+        self.speech_info["evidence"][0]["legislator_id"] = "   "
+        valid, reason = validation.validate_speech_info(
+            json.dumps(self.speech_info, ensure_ascii=False), self.source
+        )
+        self.assertFalse(valid)
+        self.assertIn("legislator_id", reason)
+
 
 if __name__ == "__main__":
     unittest.main()
