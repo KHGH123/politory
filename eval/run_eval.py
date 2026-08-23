@@ -114,26 +114,32 @@ def _load_dataset() -> list[dict]:
     return rows
 
 
-def _sources_to_contexts(sources) -> list[str]:
-    """Source(excerpt/description)를 DeepEval의 retrieval_context 문자열 목록으로 변환.
+def _sources_to_contexts(sources, member_name: str | None) -> list[str]:
+    """Source(description/excerpt)를 DeepEval의 retrieval_context 문자열 목록으로 변환.
 
-    excerpt(원문 그대로)가 있으면 우선 쓰고, 없으면 description(요약)으로
-    폴백한다 — merge/guardrail이 이미 근거 없는 항목은 걸러내므로 여기선
-    있는 그대로 옮기기만 한다.
+    excerpt/description 둘 다 넘겨도 ContextualRecall이 여전히 0점을 주는 걸
+    실측으로 확인했다 — merge의 description은 "~라고 밝혔다"처럼 매 조각마다
+    화자 이름을 반복하지 않는다(실제 화면에서는 화면3 상단 프로필 카드로
+    "누구 얘기인지"가 이미 확정돼 있어서 각 근거 조각이 매번 이름을
+    반복할 필요가 없기 때문). eval은 근거 조각 하나만 뚝 떼어 판정하므로
+    그 화면 맥락이 없다 — 실제 사용자가 갖는 것과 같은 맥락(조회 대상
+    인물이 누구인지)을 각 조각 앞에 명시해줘야 공정하게 채점된다.
     """
     contexts = []
     for s in sources:
-        text = s.excerpt or s.description or ""
-        if not text:
+        parts = [p for p in (s.description, s.excerpt) if p]
+        if not parts:
             continue
-        contexts.append(f"[{s.type}] {s.title} ({s.date or '날짜 미상'}): {text}")
+        text = " / ".join(parts)
+        who = f"{member_name} 관련 " if member_name else ""
+        contexts.append(f"[{s.type}] {who}{s.title} ({s.date or '날짜 미상'}): {text}")
     return contexts
 
 
 async def _run_case(row: dict, judge: GeminiJudge) -> dict:
     question = row["question"]
     agent_response = await _run_agent(question, row.get("member_name"), row.get("keyword"))
-    contexts = _sources_to_contexts(agent_response.sources)
+    contexts = _sources_to_contexts(agent_response.sources, row.get("member_name"))
 
     test_case = LLMTestCase(
         input=question,
