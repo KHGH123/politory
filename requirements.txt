@@ -13,6 +13,8 @@ uvicorn[standard]
 google-adk[a2a]==2.7.1
 # a2a-sdk의 JSON-RPC 라우트가 lifespan 시점에 임포트하는데 [a2a] extra에 빠져 있어 별도 명시
 sse-starlette
+# ADK McpToolset의 Streamable HTTP 클라이언트
+mcp>=1.29.0
 
 # --- 정형 데이터 (db/, pipeline/) ---
 # sqlite3는 파이썬 표준 라이브러리 포함, 별도 설치 불필요
