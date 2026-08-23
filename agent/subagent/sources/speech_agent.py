@@ -17,6 +17,8 @@ from google.adk.tools.mcp_tool.mcp_toolset import McpToolset
 from google.auth.transport.requests import Request
 from google.oauth2.id_token import fetch_id_token
 
+from .speech_evidence_validation import collect_tool_utterances
+
 
 MCP_URL = os.getenv("MCP_URL", "http://localhost:8080/mcp")
 MCP_AUDIENCE = os.getenv("MCP_AUDIENCE", "")
@@ -28,6 +30,21 @@ def _mcp_headers(_readonly_context) -> dict[str, str]:
         return {}
     token = fetch_id_token(Request(), MCP_AUDIENCE)
     return {"Authorization": f"Bearer {token}"}
+
+
+def _record_speech_evidence(tool, args, tool_context, tool_response):
+    """실제 MCP 원문을 검증용 session state에 발언 ID별로 보존한다."""
+    del args
+    if not tool.name.endswith("retrieve_speech_evidence"):
+        return None
+
+    sources = dict(tool_context.state.get("speech_source_utterances", {}))
+    for utterance in collect_tool_utterances(tool_response):
+        utterance_id = utterance.get("utterance_id")
+        if utterance_id:
+            sources[utterance_id] = utterance
+    tool_context.state["speech_source_utterances"] = sources
+    return None
 
 
 speech_mcp_tools = McpToolset(
@@ -44,6 +61,7 @@ speech_agent = Agent(
     name="speech_agent",
     model=os.getenv("MODEL", "gemini-3.5-flash"),
     tools=[speech_mcp_tools],
+    after_tool_callback=_record_speech_evidence,
     instruction="""
     너는 국회 공식 회의록에서 특정 국회의원의 주제별 발언 근거를 수집하는
     스피치 에이전트다. 반드시 연결된 MCP 도구를 실제로 호출해 회의록을
@@ -81,25 +99,29 @@ speech_agent = Agent(
     - 충분한 근거가 없으면 그 사실을 명시하고 관련 없는 결과를 채우지 않는다.
 
     ## 출력 형식
-    speech_info를 아래 형식의 한국어 텍스트로 출력한다.
+    설명, 요약, 해석, 마크다운을 넣지 말고 아래 JSON 객체만 출력한다.
+    각 값은 retrieve_speech_evidence가 반환한 필드와 정확히 같아야 한다.
+    quote만 utterance_text 안에 실제로 연속해서 존재하는 짧고 완결된 원문
+    구간으로 선택할 수 있다. 값이 없으면 임의 문자열 대신 원본의 null을 쓴다.
 
-    대상 의원: <이름>
-    검색 주제: <주제>
-    근거 상태: 충분 | 부분적 | 없음
-    한계: <검색 범위 또는 근거 부족 설명>
+    {
+      "evidence": [
+        {
+          "utterance_id": "...",
+          "speaker_name": "...",
+          "legislator_id": "...",
+          "meeting_date": "...",
+          "meeting_title": "...",
+          "quote": "utterance_text에 그대로 존재하는 원문",
+          "page_start": 1,
+          "page_end": 1,
+          "source_pdf_url": "..."
+        }
+      ]
+    }
 
-    회의록 발언 근거:
-    1. 날짜: <meeting_date>
-       회의: <meeting_title>
-       발언자: <speaker_name>
-       발언 ID: <utterance_id>
-       발언 인용: <utterance_text에 존재하는 원문 그대로의 짧고 완결된 인용>
-       페이지: <page_start>-<page_end>
-       공식 PDF: <source_pdf_url>
-
-    결과는 MCP 조회 결과의 순서대로 전달하며 임의로 시간순 정렬하거나
-    중요도를 매겨 일부만 대표 항목으로 선택하지 않는다. 채택할 발언이 없으면
-    "회의록 발언 근거: 관련 회의록 발언을 찾지 못했다"라고 출력한다.
+    결과는 MCP 조회 순서대로 전달한다. 채택할 발언이 없으면
+    {"evidence": []}만 출력한다.
 
     이전 검증에서 근거가 불분명하다고 판단됐다면 아래 재검색 지시를 반영해
     검색어와 범위를 바꿔 MCP 도구를 다시 호출한다. 첫 시도라 값이 없으면

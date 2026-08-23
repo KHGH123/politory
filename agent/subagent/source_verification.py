@@ -37,6 +37,7 @@ from google.adk.tools import exit_loop
 from google.genai import types
 
 from .sources import speech_agent, action_agent, context_agent
+from .sources.speech_evidence_validation import validate_speech_info
 
 _model = os.getenv("MODEL", "gemini-3.5-flash")
 
@@ -108,6 +109,20 @@ def _make_url_check_callback(known_urls_key: str, info_key: str, retry_hint_key:
         return types.Content(parts=[types.Part(text=hint)])
 
     return _callback
+
+
+def _check_speech_against_mcp(callback_context: CallbackContext):
+    """speech_info의 인용·메타데이터를 실제 MCP 원문과 문자열로 대조한다."""
+    valid, hint = validate_speech_info(
+        callback_context.state.get("speech_info"),
+        callback_context.state.get("speech_source_utterances", {}),
+    )
+    if valid:
+        return None
+    # 마지막 재시도까지 실패해 LoopAgent가 종료되더라도 미검증 내용이
+    # merge 단계로 넘어가지 않게 즉시 안전한 빈 결과로 교체한다.
+    callback_context.state["speech_info"] = '{"evidence": []}'
+    return types.Content(parts=[types.Part(text=hint)])
 
 
 def _make_verifier(
@@ -212,6 +227,9 @@ context_verifier.before_agent_callback = _make_url_check_callback(
     info_key="context_info",
     retry_hint_key="context_retry_hint",
 )
+
+# speech_verifier: LLM 판단 전에 실제 MCP 전체 발언과 결정적으로 대조한다.
+speech_verifier.before_agent_callback = _check_speech_against_mcp
 
 speech_verified_loop = LoopAgent(
     name="speech_verified_loop",
