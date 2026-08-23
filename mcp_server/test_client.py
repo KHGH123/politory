@@ -7,13 +7,15 @@ from fastmcp.client.transports import StreamableHttpTransport
 
 async def main():
     mcp_url = os.environ["MCP_URL"]
-    token = os.environ["ID_TOKEN"]
+    token = os.getenv("ID_TOKEN")
+
+    headers = {}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
 
     transport = StreamableHttpTransport(
         url=mcp_url,
-        headers={
-            "Authorization": f"Bearer {token}"
-        }
+        headers=headers,
     )
 
     async with Client(transport) as client:
@@ -24,8 +26,8 @@ async def main():
             print(tool.name)
 
         result = await client.call_tool(
-            "search_actions",
-            {"query": "테스트 정치인"}
+            "search_speeches",
+            {"query": os.getenv("TEST_QUERY", "국회 회의록"), "page_size": 3},
         )
 
         print("\n=== Result ===")
