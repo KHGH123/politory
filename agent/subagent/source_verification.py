@@ -43,17 +43,18 @@ _model = os.getenv("MODEL", "gemini-3.5-flash")
 
 MAX_VERIFICATION_ITERATIONS = 2
 
-# evidence_synthesis.py의 merge/guardrail에서 thinking을 끄면 응답 시간이
-# 단계당 약 1/3로 줄고 검증 품질 저하는 없었다는 실측이 있는데, 이 verifier들
-# (speech/action/context)에는 그 최적화가 빠져 있었다 — exit_loop 호출
-# 여부만 판단하는 단순 분류 작업이라 query_processing과 성격이 같으므로
-# 동일하게 적용한다. 전체 파이프라인이 최대 2회씩 도는 LoopAgent 3개를
-# 병렬로 포함하므로, verifier 1회 호출 단축분이 전체 응답 시간에 그대로
-# 곱해진다.
-_no_thinking_config = types.GenerateContentConfig(
-    thinking_config=types.ThinkingConfig(thinking_budget=0),
-)
-
+# 실측 재검토: verifier(speech/action/context) 3개에 thinking_budget=0을
+# 적용했더니 merge 단계의 각주-출처 정합 오류 재현율이 3회 중 1회에서
+# 3회 중 3회로 오히려 악화되는 게 배포 환경에서 관찰됐다. merge/guardrail
+# 자체는 손대지 않았는데 이런 변화가 났다는 건, verifier가 exit_loop
+# 여부를 덜 신중하게(추론 없이) 판단해 재검색으로 정제됐어야 할
+# speech_info/context_info가 더 뒤섞인 채로 merge에 들어갔을 가능성을
+# 시사한다 — merge가 다뤄야 할 소스가 복잡해질수록 각주 배정 실수가
+# 늘어나는 것으로 보인다. 이 가설이 확정된 건 아니지만, 확인 전까지는
+# verifier의 thinking을 원래대로 되돌린다(exit_loop 판단은 단순 분류
+# 처럼 보여도 "어디까지가 근거 있음인가"의 경계 판단에는 추론이
+# 기여했을 수 있다는 뜻 — merge/guardrail의 스키마 채우기 작업과
+# 성격이 다르다).
 _URL_PATTERN = re.compile(r"https?://[^\s\)\]\"'>]+")
 
 
@@ -179,7 +180,6 @@ def _make_verifier(
     return Agent(
         name=name,
         model=_model,
-        generate_content_config=_no_thinking_config,
         tools=[exit_loop],
         instruction=f"""
         아래는 소스 에이전트가 만든 결과다.
