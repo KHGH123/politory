@@ -266,6 +266,16 @@ def classify(request: ClassifyRequest) -> ClassifyResponse:
                 result.member_candidates = committee_matches
                 result.keywords = []
 
+    # keywords는 "인물은 확정됐고 주제만 좁히면 되는" 경우에만 의미가 있다.
+    # 프롬프트로 "member_name 없으면 keywords 비워두라"고 지시했지만 LLM이
+    # 그 지시를 어기고 member_name=null인데 keywords를 채우는 경우가 실측으로
+    # 확인됐다(예: "윤석열이 뭐하는 사람이야" -> member_name=null인데
+    # keywords로 "국정운영" 등 채워 넣음 — 위의 member_not_found 분기가 막는
+    # 경로와 달리 애초에 LLM이 member_name을 null로 낸 경우라 그 분기를 타지
+    # 않고 새어나갔다). LLM 판단에 기대지 않고 여기서 무조건 강제한다.
+    if not result.member_name:
+        result.keywords = []
+
     return result
 
 
