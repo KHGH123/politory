@@ -3,7 +3,7 @@
 
 The production path is ``--pdf-only``: preserve official PDFs and API metadata
 without requesting or parsing the unreliable HTML viewer response. PDF text is
-parsed later by ``rebuild_pdf_tables.py``. Authentication uses Google ADC.
+parsed later by ``step02_rebuild_pdf_tables.py``. Authentication uses Google ADC.
 """
 
 from __future__ import annotations
@@ -41,6 +41,7 @@ ENDPOINTS = {
 
 
 def clean_text(value: str) -> str:
+    """API·HTML 문자열의 특수 공백과 불필요한 줄바꿈을 정리한다."""
     value = value.replace("\xa0", " ")
     value = re.sub(r"[ \t\r\f\v]+", " ", value)
     value = re.sub(r" *\n *", "\n", value)
@@ -199,6 +200,7 @@ class MinutesParser(HTMLParser):
             self.active_section = None
 
     def agendas(self) -> list[dict[str, Any]]:
+        """레거시 HTML 파서에서 안건 목록을 반환한다. 운영 PDF 경로는 사용하지 않는다."""
         body = self.sections.get("minutes_body")
         if body is None:
             return []
@@ -367,6 +369,7 @@ class MinutesParser(HTMLParser):
             )
 
     def blocks(self) -> list[dict[str, Any]]:
+        """레거시 HTML 본문을 의미 블록으로 변환한다. 운영 수집에서는 호출하지 않는다."""
         output: list[dict[str, Any]] = []
         header = self.sections.get("minutes_header")
         if header is not None:
@@ -408,6 +411,7 @@ class MinutesParser(HTMLParser):
         return output
 
     def source_text(self) -> str:
+        """레거시 HTML 회의록의 전체 텍스트를 반환한다."""
         return clean_text(
             "\n".join(
                 node_text(self.sections[name])
@@ -445,6 +449,7 @@ class Collector:
         self.bigquery = bigquery.Client(project=config.project)
 
     def request(self, url: str, params: dict[str, Any] | None = None) -> bytes:
+        """재시도와 지연을 적용해 국회 API 또는 공식 PDF를 내려받는다."""
         if params:
             url = f"{url}?{urlencode(params)}"
         request = Request(url, headers={"User-Agent": USER_AGENT})
@@ -464,6 +469,7 @@ class Collector:
         raise RuntimeError(f"request failed after retries: {url}") from last_error
 
     def api_rows(self, meeting_type: str, meeting_date: date) -> tuple[list[dict[str, Any]], bytes | None]:
+        """회의 종류·날짜별 API 전체 페이지를 읽고 원응답도 보존한다."""
         endpoint = ENDPOINTS[meeting_type]
         page_size = 1000
         rows: list[dict[str, Any]] = []
@@ -522,10 +528,12 @@ class Collector:
         return rows, combined
 
     def upload(self, path: str, data: bytes, content_type: str) -> str:
+        """원응답이나 PDF 바이트를 GCS에 올리고 gs:// URI를 반환한다."""
         self.bucket.blob(path).upload_from_string(data, content_type=content_type)
         return f"gs://{self.cfg.bucket}/{path}"
 
     def existing_meeting_ids(self) -> set[str]:
+        """재실행 중복 방지를 위해 이미 완료된 meeting_id를 조회한다."""
         sql = f"""
             SELECT meeting_id
             FROM `{self.cfg.project}.{self.cfg.dataset}.meetings`
@@ -542,6 +550,7 @@ class Collector:
         return {row.meeting_id for row in self.bigquery.query(sql, job_config=job_config).result()}
 
     def discover(self) -> dict[str, list[dict[str, Any]]]:
+        """지정 기간의 본회의·위원회 API를 조회해 회의 후보를 찾는다."""
         if self.cfg.use_cached_discovery:
             return self.discover_cached()
         meetings: dict[str, list[dict[str, Any]]] = defaultdict(list)
@@ -566,6 +575,7 @@ class Collector:
         return meetings
 
     def discover_cached(self) -> dict[str, list[dict[str, Any]]]:
+        """네트워크 재조회 대신 GCS의 기존 API 원응답에서 회의를 찾는다."""
         meetings: dict[str, list[dict[str, Any]]] = defaultdict(list)
         pattern = re.compile(r"raw/api/([^/]+)/year=(\d{4})/date=(\d{4}-\d{2}-\d{2})/response[.]json$")
         selected: list[tuple[Any, str]] = []
@@ -614,6 +624,7 @@ class Collector:
         list[dict[str, Any]],
         dict[str, Any],
     ]:
+        """레거시 HTML 처리 함수다. 현재 PDF 전용 운영 경로에서는 호출하지 않는다."""
         meta = api_rows[0]
         meeting_type = meta["_meeting_type"]
         confer_num = int(meta["CONFER_NUM"])
@@ -901,6 +912,7 @@ class Collector:
         return meeting_row, agenda_rows, [], [], document_row
 
     def cleanup_partial(self, meeting_ids: list[str], document_ids: list[str]) -> None:
+        """같은 ID를 재처리하기 전에 이전의 부분 적재 행만 제거한다."""
         if not meeting_ids and not document_ids:
             return
         sql = f"""
@@ -922,6 +934,7 @@ class Collector:
         self.bigquery.query(sql, job_config=job_config).result()
 
     def load_rows(self, table: str, rows: list[dict[str, Any]]) -> None:
+        """검증된 배치 행을 지정 BigQuery 운영 테이블에 추가한다."""
         if not rows:
             return
         table_id = f"{self.cfg.project}.{self.cfg.dataset}.{table}"
@@ -937,6 +950,7 @@ class Collector:
         utterances: list[dict[str, Any]],
         documents: list[dict[str, Any]],
     ) -> None:
+        """같은 ID의 부분 행을 정리한 뒤 수집 배치를 BigQuery에 순서대로 적재한다."""
         if not meetings and not documents:
             return
         self.cleanup_partial(
@@ -952,6 +966,7 @@ class Collector:
     def failed_document(
         self, meeting_id: str, api_rows: list[dict[str, Any]], collected_at: str, error: Exception
     ) -> dict[str, Any]:
+        """PDF 다운로드 실패를 삭제하지 않고 ingestion 이력 행으로 남긴다."""
         meta = api_rows[0]
         meeting_type = meta["_meeting_type"]
         confer_num = int(meta["CONFER_NUM"])
@@ -984,6 +999,7 @@ class Collector:
         }
 
     def run(self) -> None:
+        """회의 발견, 신규 선별, PDF 병렬 다운로드와 BigQuery 적재를 총괄한다."""
         discovered = self.discover()
         existing = self.existing_meeting_ids()
         candidates = list(sorted(discovered.items()))
@@ -1066,6 +1082,7 @@ class Collector:
 
 
 def parse_args() -> Config:
+    """수집 기간·회의 종류·GCP 자원을 검증해 Collector 설정을 만든다."""
     parser = argparse.ArgumentParser(description="Collect Korean National Assembly minutes")
     parser.add_argument("--year", type=int, default=2026)
     parser.add_argument("--start-date", type=date.fromisoformat)
@@ -1139,6 +1156,7 @@ def parse_args() -> Config:
 
 
 def main() -> int:
+    """국회 회의 메타데이터와 공식 PDF 수집 단계를 실행한다."""
     try:
         Collector(parse_args()).run()
         return 0

@@ -174,6 +174,13 @@ CREATE TABLE IF NOT EXISTS `proj-aj04-211200020328.assembly.search_documents`
 )
 OPTIONS(description = "Vertex AI Search structured-data import documents (id, jsonData)");
 
+CREATE TABLE IF NOT EXISTS `proj-aj04-211200020328.assembly.vote_search_documents`
+(
+  id STRING NOT NULL,
+  jsonData STRING
+)
+OPTIONS(description = "공식 PDF 전자투표 찬반 명단 기반 Vertex AI Search 문서");
+
 -- Non-destructive migration for tables created before source/canonical IDs were split.
 ALTER TABLE `proj-aj04-211200020328.assembly.meetings`
   ADD COLUMN IF NOT EXISTS raw_html_gcs_uri STRING;

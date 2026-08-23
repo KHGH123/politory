@@ -18,6 +18,7 @@ DATASET = "assembly"
 
 
 def compact(value: str | None) -> str:
+    """메타데이터와 PDF 표제를 비교할 수 있도록 공백을 제거한다."""
     return re.sub(r"[^0-9A-Za-z가-힣]", "", value or "")
 
 
@@ -30,6 +31,7 @@ class AuditResult:
 
 
 def audit_one(row: object, storage_client: storage.Client) -> AuditResult:
+    """회의 한 건의 BigQuery 메타데이터와 GCS PDF 표제를 대조한다."""
     uri = row.raw_pdf_gcs_uri
     if not uri or not uri.startswith("gs://"):
         return AuditResult(row.meeting_id, False, 0, "missing PDF URI")
@@ -73,6 +75,7 @@ def audit_one(row: object, storage_client: storage.Client) -> AuditResult:
 
 
 def main() -> int:
+    """모든 회의 PDF를 읽기 전용으로 감사하고 불일치 요약을 출력한다."""
     bq = bigquery.Client(project=PROJECT)
     rows = list(
         bq.query(

@@ -63,6 +63,7 @@ def split_text(text: str) -> list[TextChunk]:
 
 
 def limited_context(speaker: str | None, text: str | None, *, tail: bool) -> str | None:
+    """검색 문서에 넣을 이전·다음 발언 문맥을 제한된 길이로 만든다."""
     if not text:
         return None
     if len(text) <= CONTEXT_CHARS:
@@ -79,6 +80,7 @@ def json_default(value: Any) -> str:
 
 
 def document_id(utterance_id: str, chunk_index: int) -> str:
+    """발언 ID와 청크 번호로 재실행에도 안정적인 검색 문서 ID를 만든다."""
     digest = hashlib.sha256(
         f"{DOCUMENT_VERSION}:{utterance_id}:{chunk_index}".encode("utf-8")
     ).hexdigest()[:48]
@@ -86,6 +88,7 @@ def document_id(utterance_id: str, chunk_index: int) -> str:
 
 
 def build_document(row: Any, chunk: TextChunk, chunk_count: int) -> dict[str, str]:
+    """발언 청크와 회의·발언자·PDF 근거를 Vertex Search 문서로 변환한다."""
     speaker = row.speaker_name or row.speaker_label or "발언자 미상"
     short = len(row.utterance_text) < SHORT_UTTERANCE_CHARS
     before = limited_context(
@@ -180,6 +183,7 @@ def source_query(
     meeting_ids: list[str],
     month_start: date | None = None,
 ) -> tuple[str, bigquery.QueryJobConfig]:
+    """전체 또는 지정 범위의 발언과 주변 문맥을 읽는 BigQuery SQL을 만든다."""
     where = ""
     parameters: list[bigquery.QueryParameter] = []
     if meeting_ids:
@@ -230,6 +234,7 @@ def source_query(
 
 
 def generate_documents(rows: Iterator[Any]) -> Iterator[dict[str, str]]:
+    """발언 행을 손실 없이 청킹하여 검색 문서를 순차 생성한다."""
     for row in rows:
         chunks = split_text(row.utterance_text)
         for chunk in chunks:
@@ -237,6 +242,7 @@ def generate_documents(rows: Iterator[Any]) -> Iterator[dict[str, str]]:
 
 
 def run_self_tests() -> None:
+    """청크 결합 시 원문이 정확히 복원되는지 로컬 자체 테스트한다."""
     samples = [
         "예.",
         "가" * (MAX_CHARS + 1),
@@ -251,6 +257,7 @@ def run_self_tests() -> None:
 
 
 def parse_args() -> argparse.Namespace:
+    """검색 문서 생성 범위와 점검 전용 옵션을 읽는다."""
     parser = argparse.ArgumentParser(description="Build Vertex AI Search documents")
     parser.add_argument("--project", default="proj-aj04-211200020328")
     parser.add_argument("--dataset", default="assembly")
@@ -284,6 +291,7 @@ def publish_staging(
 
 
 def main() -> int:
+    """월별 스테이징을 완성한 뒤 전체 search_documents를 게시한다."""
     args = parse_args()
     run_self_tests()
     if args.self_test_only:

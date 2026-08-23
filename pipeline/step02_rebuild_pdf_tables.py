@@ -19,7 +19,7 @@ from typing import Any, Iterable
 
 from google.cloud import bigquery, storage
 
-from normalize_legislators import fetch_members
+from step03_normalize_legislators import fetch_members
 
 
 PROJECT = "proj-aj04-211200020328"
@@ -40,10 +40,12 @@ LEGISLATIVE_ROLE = re.compile(r"^(?:(?:소|부)?위원장(?:대리)?|국회의�
 
 
 def normalize(value: str | None) -> str:
+    """PDF 문자열을 Unicode NFKC와 단일 공백 형태로 정규화한다."""
     return re.sub(r"\s+", " ", unicodedata.normalize("NFKC", value or "")).strip()
 
 
 def sha256(value: str | bytes) -> str:
+    """원문 무결성 확인에 사용하는 SHA-256을 계산한다."""
     if isinstance(value, str):
         value = value.encode("utf-8")
     return hashlib.sha256(value).hexdigest()
@@ -56,6 +58,7 @@ def json_default(value: Any) -> str:
 
 
 def extract_pages(pdf: bytes) -> list[str]:
+    """공식 PDF를 pdftotext -raw로 변환해 페이지별 텍스트를 반환한다."""
     process = subprocess.run(
         ["pdftotext", "-raw", "-", "-"],
         input=pdf,
@@ -102,6 +105,7 @@ def unwrap(text: str) -> str:
 
 
 def member_aliases(api_rows: list[dict[str, Any]]) -> tuple[list[str], dict[str, str]]:
+    """공식 의원 명부에서 이름 별칭과 내부 의원 ID 매핑을 만든다."""
     alias_to_id: dict[str, str] = {}
     for row in api_rows:
         code = normalize(row.get("NAAS_CD") or row.get("MONA_CD"))
@@ -115,6 +119,7 @@ def member_aliases(api_rows: list[dict[str, Any]]) -> tuple[list[str], dict[str,
 def parse_speaker_line(
     line: str, aliases: list[str], alias_to_id: dict[str, str]
 ) -> tuple[str, str | None, str | None, str | None, str]:
+    """PDF 발언자 표식 행을 이름·직위·의원 ID와 본문으로 분해한다."""
     line = normalize(line)
     # Official names must win over the generic role/name pattern. Otherwise a
     # line such as "박수영 위원 야당 간사..." is misread as position
@@ -157,6 +162,7 @@ def parse_utterances(
     alias_to_id: dict[str, str],
     collected_at: str,
 ) -> list[dict[str, Any]]:
+    """페이지 텍스트를 발언 순서대로 분리하고 근거 페이지를 보존한다."""
     output: list[dict[str, Any]] = []
     current: dict[str, Any] | None = None
 
@@ -237,6 +243,7 @@ def process_meeting(
     alias_to_id: dict[str, str],
     collected_at: str,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """회의 한 건의 GCS PDF를 읽어 페이지 행과 발언 행을 생성한다."""
     uri = meeting.raw_pdf_gcs_uri
     bucket_name, blob_name = uri[5:].split("/", 1)
     pdf = storage_client.bucket(bucket_name).blob(blob_name).download_as_bytes()
@@ -265,6 +272,7 @@ def process_meeting(
 
 
 def write_rows(handle: Any, rows: Iterable[dict[str, Any]]) -> int:
+    """행 목록을 NDJSON 임시 파일에 기록하고 기록 건수를 반환한다."""
     count = 0
     for row in rows:
         handle.write((json.dumps(row, ensure_ascii=False, default=json_default) + "\n").encode())
@@ -278,6 +286,7 @@ def cached_agendas(
     meeting_ids: set[str],
     collected_at: str,
 ) -> list[dict[str, Any]]:
+    """GCS에 보존된 API 응답에서 회의 안건을 복원한다."""
     discovered: dict[tuple[str, str], dict[str, Any]] = {}
     pattern = re.compile(r"raw/api/(plenary|committee)/year=\d{4}/date=.*?/response[.]json$")
     for blob in storage_client.list_blobs(bucket_name, prefix="raw/api/"):
@@ -317,6 +326,7 @@ def cached_agendas(
 
 
 def schema(table: str) -> list[bigquery.SchemaField]:
+    """PDF 파생 테이블의 명시적 BigQuery 스키마를 반환한다."""
     if table == "pdf_pages":
         return [
             bigquery.SchemaField("page_id", "STRING", mode="REQUIRED"),
@@ -373,6 +383,7 @@ def schema(table: str) -> list[bigquery.SchemaField]:
 
 
 def load_file(client: bigquery.Client, table: str, handle: Any, table_schema: list[bigquery.SchemaField]) -> None:
+    """NDJSON 임시 파일을 새 스테이징 테이블에 적재한다."""
     client.delete_table(table, not_found_ok=True)
     client.create_table(bigquery.Table(table, schema=table_schema))
     handle.seek(0)
@@ -384,7 +395,62 @@ def load_file(client: bigquery.Client, table: str, handle: Any, table_schema: li
     client.load_table_from_file(handle, table, job_config=config).result()
 
 
+def publish_validated_tables(
+    client: bigquery.Client,
+    prefix: str,
+    page_staging: str,
+    utterance_staging: str,
+    meeting_id: str | None,
+) -> None:
+    """Atomically publish data that has already passed staging validation."""
+    predicate = "WHERE meeting_id = @meeting_id" if meeting_id else ""
+    delete_predicate = "WHERE meeting_id = @meeting_id" if meeting_id else "WHERE TRUE"
+    job_config = (
+        bigquery.QueryJobConfig(
+            query_parameters=[
+                bigquery.ScalarQueryParameter("meeting_id", "STRING", meeting_id)
+            ]
+        )
+        if meeting_id
+        else None
+    )
+    client.query(
+        f"""
+        BEGIN TRANSACTION;
+        DELETE FROM `{prefix}.pdf_pages` {delete_predicate};
+        INSERT INTO `{prefix}.pdf_pages` (
+          page_id, meeting_id, page_number, extracted_text, source_pdf_gcs_uri,
+          content_sha256, extraction_method, parser_version, meeting_date,
+          meeting_type, committee_name, collected_at
+        )
+        SELECT
+          page_id, meeting_id, page_number, extracted_text, source_pdf_gcs_uri,
+          content_sha256, extraction_method, parser_version, meeting_date,
+          meeting_type, committee_name, collected_at
+        FROM `{page_staging}` {predicate};
+        DELETE FROM `{prefix}.utterances` {delete_predicate};
+        INSERT INTO `{prefix}.utterances` (
+          utterance_id, meeting_id, sequence_no, speaker_member_id,
+          source_speaker_id, legislator_id, speaker_label, speaker_name,
+          speaker_position, utterance_text, content_sha256, page_start, page_end,
+          source_pdf_gcs_uri, agenda_ids, source_anchor, meeting_date, meeting_type,
+          committee_name, collected_at, parser_version, block_id, agenda_link_method
+        )
+        SELECT
+          utterance_id, meeting_id, sequence_no, speaker_member_id,
+          source_speaker_id, legislator_id, speaker_label, speaker_name,
+          speaker_position, utterance_text, content_sha256, page_start, page_end,
+          source_pdf_gcs_uri, agenda_ids, source_anchor, meeting_date, meeting_type,
+          committee_name, collected_at, parser_version, block_id, agenda_link_method
+        FROM `{utterance_staging}` {predicate};
+        COMMIT TRANSACTION;
+        """,
+        job_config=job_config,
+    ).result()
+
+
 def parse_args() -> argparse.Namespace:
+    """PDF 재구축 대상과 실제 반영 여부(--apply)를 읽는다."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--project", default=PROJECT)
     parser.add_argument("--dataset", default=DATASET)
@@ -397,6 +463,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> int:
+    """전체 PDF를 파싱·검증하고 운영 테이블을 안전하게 교체한다."""
     args = parse_args()
     api_key = os.environ.get("ASSEMBLY_API_KEY")
     if not api_key:
@@ -495,7 +562,13 @@ def main() -> int:
     print(json.dumps(metrics, indent=2))
     if any(metrics.values()):
         raise RuntimeError("staging validation failed")
-    print(f"staging ready: {page_staging}, {utterance_staging}")
+    publish_validated_tables(bq, prefix, page_staging, utterance_staging, args.meeting_id)
+    bq.delete_table(page_staging, not_found_ok=True)
+    bq.delete_table(utterance_staging, not_found_ok=True)
+    print(
+        f"published pages={page_count:,}, utterances={utterance_count:,} "
+        f"-> {prefix}.pdf_pages, {prefix}.utterances"
+    )
     return 0
 
 

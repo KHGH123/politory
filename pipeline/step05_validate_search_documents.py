@@ -11,6 +11,7 @@ from google.cloud import bigquery
 
 
 def parse_args() -> argparse.Namespace:
+    """검증할 프로젝트와 데이터셋을 읽는다."""
     parser = argparse.ArgumentParser(description="Validate assembly.search_documents")
     parser.add_argument("--project", default="proj-aj04-211200020328")
     parser.add_argument("--dataset", default="assembly")
@@ -18,6 +19,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> int:
+    """발언 검색문서의 JSON·ID·원문 복원·근거 연결을 전수 검사한다."""
     args = parse_args()
     client = bigquery.Client(project=args.project)
     prefix = f"{args.project}.{args.dataset}"

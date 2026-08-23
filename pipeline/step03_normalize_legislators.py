@@ -27,6 +27,7 @@ IDENTITY_VERSION = "speaker-identity-v1"
 
 
 def normalize_text(value: str | None) -> str:
+    """API와 PDF 문자열을 비교 가능한 Unicode·공백 형태로 정규화한다."""
     if not value:
         return ""
     value = unicodedata.normalize("NFKC", value)
@@ -72,6 +73,7 @@ def identity_id(
 
 
 def fetch_member_page(api_key: str, page: int) -> tuple[list[dict[str, Any]], int, bytes]:
+    """국회 공식 의원 API 한 페이지와 선언된 전체 건수를 가져온다."""
     params = {"KEY": api_key, "Type": "json", "pIndex": page, "pSize": 1000}
     request = Request(
         f"{API_BASE}/{MEMBER_ENDPOINT}?{urlencode(params)}",
@@ -95,6 +97,7 @@ def fetch_member_page(api_key: str, page: int) -> tuple[list[dict[str, Any]], in
 def fetch_members(
     api_key: str, assembly_no: int
 ) -> tuple[list[dict[str, Any]], list[bytes]]:
+    """의원 API 전체 페이지를 수집하고 지정 국회 대수의 의원만 반환한다."""
     first_rows, total, first_raw = fetch_member_page(api_key, 1)
     all_rows = list(first_rows)
     raw_pages = [first_raw]
@@ -118,6 +121,7 @@ def fetch_members(
 def build_legislators(
     api_rows: list[dict[str, Any]], assembly_no: int, collected_at: str
 ) -> list[dict[str, Any]]:
+    """공식 의원 코드로 안정적인 legislators 마스터 행을 생성한다."""
     result: list[dict[str, Any]] = []
     for row in api_rows:
         official_code = normalize_text(row.get("NAAS_CD") or row.get("MONA_CD"))
@@ -153,6 +157,7 @@ def build_identity_map(
     legislators: list[dict[str, Any]],
     collected_at: str,
 ) -> list[dict[str, Any]]:
+    """회의별 PDF 발언자 표기를 공식 의원 ID에 보수적으로 연결한다."""
     by_name: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for member in legislators:
         for alias in member["_name_aliases"]:
@@ -239,6 +244,7 @@ def build_identity_map(
 
 
 def identity_source_query(project: str, dataset: str, assembly_no: int) -> str:
+    """발언자 표기별 출현 횟수를 집계하는 BigQuery SQL을 만든다."""
     return f"""
       SELECT
         m.assembly_no,
@@ -313,6 +319,19 @@ def table_schema(name: str) -> list[bigquery.SchemaField]:
             bigquery.SchemaField("source_updated_at", "TIMESTAMP"),
             bigquery.SchemaField("collected_at", "TIMESTAMP", mode="REQUIRED"),
         ]
+    if name == "legislator_terms":
+        return [
+            bigquery.SchemaField("term_id", "STRING", mode="REQUIRED"),
+            bigquery.SchemaField("legislator_id", "STRING", mode="REQUIRED"),
+            bigquery.SchemaField("assembly_no", "INTEGER", mode="REQUIRED"),
+            bigquery.SchemaField("name", "STRING", mode="REQUIRED"),
+            bigquery.SchemaField("party_name", "STRING"),
+            bigquery.SchemaField("district", "STRING"),
+            bigquery.SchemaField("term_start", "DATE"),
+            bigquery.SchemaField("term_end", "DATE"),
+            bigquery.SchemaField("source", "STRING"),
+            bigquery.SchemaField("collected_at", "TIMESTAMP"),
+        ]
     if name == "speaker_identity_map":
         return [
             bigquery.SchemaField("speaker_identity_id", "STRING", mode="REQUIRED"),
@@ -338,6 +357,7 @@ def publish_table(
     rows: list[dict[str, Any]],
     schema: list[bigquery.SchemaField],
 ) -> None:
+    """정규화 테이블을 스테이징에 검증한 후 운영 테이블로 게시한다."""
     staging = target + "_staging"
     client.delete_table(staging, not_found_ok=True)
     client.create_table(bigquery.Table(staging, schema=schema))
@@ -360,6 +380,7 @@ def publish_table(
 
 
 def apply_updates(client: bigquery.Client, project: str, dataset: str) -> None:
+    """MATCHED 매핑만 사용해 utterances.legislator_id를 갱신한다."""
     prefix = f"{project}.{dataset}"
     sql = f"""
       BEGIN TRANSACTION;
@@ -385,6 +406,7 @@ def apply_updates(client: bigquery.Client, project: str, dataset: str) -> None:
 
 
 def validate_applied(client: bigquery.Client, project: str, dataset: str) -> dict[str, int]:
+    """의원 ID 중복, 고아 연결 및 실제 적용 건수를 검사한다."""
     prefix = f"{project}.{dataset}"
     query = f"""
       WITH metrics AS (
@@ -430,6 +452,7 @@ def validate_applied(client: bigquery.Client, project: str, dataset: str) -> dic
 
 
 def parse_args() -> argparse.Namespace:
+    """의원 정규화 대상 GCP 자원과 --apply 여부를 읽는다."""
     parser = argparse.ArgumentParser(description="Normalize Assembly legislator identities")
     parser.add_argument("--project", default="proj-aj04-211200020328")
     parser.add_argument("--dataset", default="assembly")
@@ -440,6 +463,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> int:
+    """공식 명부 수집, 의원 테이블 생성, 발언자 매핑과 검증을 수행한다."""
     args = parse_args()
     api_key = os.environ.get("ASSEMBLY_API_KEY")
     if not api_key:
@@ -476,11 +500,32 @@ def main() -> int:
         {key: value for key, value in row.items() if not key.startswith("_")}
         for row in identities
     ]
+    legislator_terms = [
+        {
+            "term_id": f"{row['legislator_id']}:assembly:{row['assembly_no']}",
+            "legislator_id": row["legislator_id"],
+            "assembly_no": row["assembly_no"],
+            "name": row["name"],
+            "party_name": row["party_name"],
+            "district": row["district"],
+            "term_start": row["term_start"],
+            "term_end": row["term_end"],
+            "source": row["source"],
+            "collected_at": row["collected_at"],
+        }
+        for row in public_legislators
+    ]
     publish_table(
         client,
         f"{args.project}.{args.dataset}.legislators",
         public_legislators,
         table_schema("legislators"),
+    )
+    publish_table(
+        client,
+        f"{args.project}.{args.dataset}.legislator_terms",
+        legislator_terms,
+        table_schema("legislator_terms"),
     )
     publish_table(
         client,
