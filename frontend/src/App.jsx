@@ -211,7 +211,6 @@ function App() {
   return (
     <ResultsScreen
       question={question}
-      memberName={memberName}
       result={result}
       onReset={handleBackFromResults}
     />

@@ -89,6 +89,18 @@ function RefineScreen({
               </div>
             </>
           )}
+
+          {/* 후보도 키워드도 하나도 없으면 백엔드(classify)가 이 이름을 등록된
+              국회의원으로도, 관련 상임위 인물로도 특정하지 못했다는 뜻이다
+              (예: 정치인이 아닌 이름). 빈 화면만 보여주면 사용자가 뭐가
+              잘못됐는지 알 수 없으니 명시적으로 안내한다. */}
+          {(!memberCandidates || memberCandidates.length === 0) &&
+            keywordSuggestions.length === 0 &&
+            !loading && (
+              <p className="hint">
+                등록된 국회의원을 찾지 못했습니다. 이름이나 표현을 다시 확인해주세요.
+              </p>
+            )}
         </form>
 
         {loading && <p className="hint">조회 중...</p>}
