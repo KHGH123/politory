@@ -179,7 +179,19 @@ function App() {
         keywordSuggestions={keywordSuggestions}
         onSubmit={(e) => {
           e.preventDefault()
-          classifyAndRoute(memberName)
+          // 인물이 이미 확정돼 있고(confirmedMemberName) 입력창이 여전히 그
+          // 인물을 가리키는 텍스트면(예: "이재명" -> "이재명 주식") 같은 사람의
+          // 주제만 좁히는 것이므로 classify를 다시 태우지 않고 바로 조회한다 —
+          // classify의 LLM은 주제가 아무리 좁혀져도("주식" -> "이재명 주식")
+          // 법안/제도명 수준이 아니면 계속 "안 구체적"이라고 판단해 화면2에서
+          // 못 벗어나는 무한루프가 생길 수 있다(실측 확인). 입력창 텍스트를
+          // 완전히 다른 사람으로 바꾼 경우(confirmedMemberName이 더 이상 포함
+          // 안 됨)에만 classifyAndRoute로 처음부터 다시 판단한다.
+          if (confirmedMemberName && memberName.includes(confirmedMemberName)) {
+            runQuery(memberName, confirmedMemberName, confirmedParty || null, memberName)
+          } else {
+            classifyAndRoute(memberName)
+          }
         }}
         onKeywordClick={(kw) =>
           runQuery(memberName, confirmedMemberName || null, confirmedParty || null, kw)
