@@ -232,26 +232,39 @@ def classify(request: ClassifyRequest) -> ClassifyResponse:
 
     # LLM이 "이 사람이 실존 의원인지"를 자체 판단하게 두지 않고, BigQuery MP
     # 테이블 조회로 확정한다.
+    member_not_found = False
     if result.member_name:
         candidates = _find_members_by_name(result.member_name)
         if len(candidates) == 0:
-            # DB에 없으면 무조건 화면2(정책/키워드 확인)로 보낸다.
+            # DB에 없으면 무조건 화면2(정책/키워드 확인)로 보낸다. 이때 keywords는
+            # 반드시 비워야 한다 — LLM이 member_name을 실존 의원이라고 착각한
+            # 상태에서 만든 키워드라(예: "윤석열이 뭐하는 사람이야" -> 키워드로
+            # "의대 정원 확대" 등 정부 정책을 추천), 존재하지 않는 인물과 관련된
+            # 것처럼 보이는 키워드를 그대로 두면 사용자가 그걸 눌러 인물 미확정
+            # 상태로 조회가 나가는 문제가 있었다(실사용 중 발견, 2026-08-23).
             result.sufficient = False
             result.member_name = None
+            result.keywords = []
+            member_not_found = True
         elif len(candidates) > 1:
             # 동명이인 — 어느 쪽인지 특정 안 되니 화면2에서 사용자가 직접 고르게 한다.
             result.sufficient = False
             result.member_name = None
             result.member_candidates = candidates
-    elif llm_result.committee_guess:
-        # 인물 없이 정책만 있는 질문 — "검색축은 인물"이라는 원칙에 따라 정책 키워드
-        # 대신 그 정책을 다루는 상임위 소속 실제 의원을 추천 카드로 보여준다.
-        # committee_guess 자체는 DB에 없을 수도 있으니(오타/변형 표기), 매칭되는
-        # 의원이 없으면 원래 하던 대로 정책 키워드로 폴백한다.
-        committee_matches = _find_members_by_committee(llm_result.committee_guess)
-        if committee_matches:
-            result.member_candidates = committee_matches
-            result.keywords = []
+
+    if not result.member_name and not result.member_candidates and llm_result.committee_guess:
+        # 인물이 없거나(정책만 있는 질문) DB에 없는 인물이면, "검색축은 인물"이라는
+        # 원칙에 따라 정책 키워드 대신 그 정책을 다루는 상임위 소속 실제 의원을
+        # 추천 카드로 보여준다. committee_guess 자체는 DB에 없을 수도 있으니
+        # (오타/변형 표기), 매칭되는 의원이 없으면 정책 키워드로 폴백한다 —
+        # 단, member_not_found(실존하지 않는 인물을 지칭한 경우)에는 이미 위에서
+        # keywords를 비웠으니 그대로 빈 채로 둔다(엉뚱한 사람 이름에 낚여
+        # 상임위를 추천하는 것도 부적절하므로 committee_guess 자체를 쓰지 않는다).
+        if not member_not_found:
+            committee_matches = _find_members_by_committee(llm_result.committee_guess)
+            if committee_matches:
+                result.member_candidates = committee_matches
+                result.keywords = []
 
     return result
 
