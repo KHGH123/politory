@@ -168,6 +168,9 @@ def documents_for_vote(
     vote: dict[str, Any], meeting: dict[str, Any], names_to_ids: dict[str, list[str]]
 ) -> list[dict[str, str]]:
     """표결 한 건을 요약 문서와 의원별 선택 문서로 변환한다."""
+    # Vertex AI Search document IDs accept only letters, numbers, '_' and '-'.
+    # Keep the colon-delimited vote_id inside jsonData, but publish a safe outer ID.
+    document_id_base = vote["vote_id"].replace(":", "_")
     common = {
         "schema_version": SCHEMA_VERSION,
         "vote_id": vote["vote_id"],
@@ -198,7 +201,7 @@ def documents_for_vote(
         "content": summary_content,
         "retrieval_text": f"{vote['vote_date']} {vote['title']} {summary_content}",
     }
-    result = [{"id": f"{vote['vote_id']}:summary", "jsonData": json.dumps(summary, ensure_ascii=False, separators=(",", ":"))}]
+    result = [{"id": f"{document_id_base}_summary", "jsonData": json.dumps(summary, ensure_ascii=False, separators=(",", ":"))}]
     choice_codes = {"찬성": "YES", "반대": "NO", "기권": "ABSTAIN"}
     for label, choice in vote["choices"].items():
         for index, member_name in enumerate(choice["names"], start=1):
@@ -218,7 +221,7 @@ def documents_for_vote(
                 "identity_status": "MATCHED" if legislator_id else "AMBIGUOUS",
             }
             result.append({
-                "id": f"{vote['vote_id']}:{choice_codes[label].lower()}:{index:03d}:{sha256(member_name)[:8]}",
+                "id": f"{document_id_base}_{choice_codes[label].lower()}_{index:03d}_{sha256(member_name)[:8]}",
                 "jsonData": json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
             })
     return result
@@ -275,7 +278,14 @@ def main() -> int:
     ids = [row["id"] for row in documents]
     if len(ids) != len(set(ids)):
         raise RuntimeError("duplicate document IDs")
-    member_docs = [json.loads(row["jsonData"]) for row in documents if ':summary' not in row["id"]]
+    # Determine the document kind from the payload, not from ID punctuation.
+    # This stays correct if Vertex AI Search ID formatting changes again.
+    parsed_documents = [json.loads(row["jsonData"]) for row in documents]
+    member_docs = [
+        document
+        for document in parsed_documents
+        if document["document_type"] == "assembly_vote_member"
+    ]
     metrics = {
         "meetings_with_candidate_pages": len(pages_by_meeting),
         "validated_votes": len(votes),

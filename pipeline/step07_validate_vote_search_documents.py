@@ -35,6 +35,7 @@ def main() -> int:
       ), metrics AS (
         SELECT 'documents' metric, COUNT(*) value FROM docs
         UNION ALL SELECT 'distinct_ids', COUNT(DISTINCT id) FROM docs
+        UNION ALL SELECT 'invalid_document_ids', COUNTIF(NOT REGEXP_CONTAINS(id, r'^[A-Za-z0-9_-]+$') OR LENGTH(id) > 63) FROM docs
         UNION ALL SELECT 'invalid_json', COUNTIF(SAFE.PARSE_JSON(jsonData) IS NULL) FROM docs
         UNION ALL SELECT 'summary_documents', COUNTIF(document_type='assembly_vote_summary') FROM docs
         UNION ALL SELECT 'member_documents', COUNTIF(document_type='assembly_vote_member') FROM docs
@@ -50,7 +51,7 @@ def main() -> int:
     """).result()
     metrics = {row.metric: int(row.value) for row in rows}
     expected_zero = [
-        "invalid_json", "invalid_document_types", "missing_vote_identity",
+        "invalid_json", "invalid_document_ids", "invalid_document_types", "missing_vote_identity",
         "invalid_member_choices", "invalid_counts", "invalid_pages",
         "meeting_pdf_mismatches", "votes_without_one_summary",
         "vote_member_count_mismatches",

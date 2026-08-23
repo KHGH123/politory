@@ -232,6 +232,8 @@ BigQuery 트랜잭션으로 `pdf_pages`와 `utterances`를 교체한다. 새 기
 추출한다. PDF에 적힌 선택별 인원수와 추출 이름 수, 전체 투표 인원 합계가 모두 맞는
 표결만 `vote_search_documents(id, jsonData)`에 게시한다. 의원 이름은 항상 보존하고,
 기존 의원 마스터에서 유일하게 확인될 때만 `legislator_id`도 함께 기록한다.
+바깥 `id`는 Vertex AI Search 제약에 맞춰 영문·숫자·밑줄·하이픈만 사용하고 63자 이하인지
+검증한다. 내부 연결키인 `jsonData.vote_id`는 이 제한과 별도로 관리한다.
 
 ### 6. 기존 Vertex AI Search Data Store 갱신
 
