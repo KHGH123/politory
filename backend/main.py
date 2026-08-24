@@ -369,8 +369,41 @@ async def _run_agent(question: str, member_name: str | None, keyword: str | None
     # 배열 자체의 정렬은 강제하지 않아서, 실제로 날짜가 뒤섞여 나오는 걸
     # 확인했다(예: 08-20, 08-11, 08-12, 08-20 순). LLM 출력 순서에 기대지 않고
     # 여기서 date 기준으로 확실하게 정렬한다.
+    #
+    # 이 정렬을 각주 번호 계산(_resolve_footnote_numbers)보다 반드시 먼저
+    # 해야 한다 — evidence_synthesis.py의 _resolve_footnotes는 더 이상 sources를
+    # 재정렬하거나 번호를 확정하지 않는다(그 단계에서 확정해버리면, 이후 여기서
+    # sources만 재정렬될 때 answer에 이미 박힌 [1][2][3] 텍스트와 배열 순서가
+    # 다시 어긋나는 버그가 배포에서 실측됐다 — evidence_synthesis.py 주석 참고).
+    # "sources를 어떤 순서로 배치할지"와 "그 순서로 번호를 매기는 것"을 이
+    # 함수 안에서 순서대로 실행해 정렬 기준이 한 곳에만 있게 한다.
     final_answer.sources = sorted(final_answer.sources, key=_source_sort_key)
+    _resolve_footnote_numbers(final_answer)
     return final_answer
+
+
+_REF_MARKER_PATTERN = re.compile(r"⟦(s\d+)⟧")
+
+
+def _resolve_footnote_numbers(response: AgentResponse) -> None:
+    """정렬이 끝난 response.sources 순서를 기준으로 answer의 ⟦sN⟧ 라벨을
+    최종 각주 번호 "[1]", "[2]"...로 확정하고, 내부 처리용 필드였던 ref_id를
+    응답에서 제거한다(evidence_synthesis.py의 구 _resolve_footnotes가 하던 일을
+    여기로 옮긴 것 — 옮긴 이유는 위 호출부 주석 참고). 반드시 sources 정렬
+    *이후*에 호출해야 번호와 배열 인덱스가 일치한다.
+    """
+    index_by_ref: dict[str, int] = {}
+    for i, source in enumerate(response.sources, start=1):
+        if source.ref_id:
+            index_by_ref.setdefault(source.ref_id, i)
+
+    response.answer = _REF_MARKER_PATTERN.sub(
+        lambda m: (f"[{index_by_ref[m.group(1)]}]" if m.group(1) in index_by_ref else ""),
+        response.answer,
+    )
+
+    for source in response.sources:
+        source.ref_id = ""
 
 
 _KOREAN_DATE_RE = re.compile(r"(\d{4})년\s*(\d{1,2})월\s*(\d{1,2})일")
