@@ -51,3 +51,27 @@ CI/CD (선택, GCP 배포 시): `infra/README.md` 참고.
 ```
 python scripts/verify_data_source.py --api-id <API_ID>
 ```
+
+로컬 Eval 평가(배포된 비공개 MCP 사용):
+
+1. `.env`에 MCP 주소를 로컬 프록시 주소로 설정한다. `https`가 아닌 `http`를 사용하고, `MCP_AUDIENCE`는 비워 둔다.
+
+   ```env
+   MCP_URL=http://localhost:8081/mcp
+   MCP_AUDIENCE=
+   ```
+
+2. Cloud Run Invoker 권한이 있는 계정으로 로그인한 뒤, 첫 번째 터미널에서 프록시를 계속 실행한다.
+
+   ```bash
+   gcloud auth login
+   gcloud run services proxy <MCP_SERVICE_NAME> --project=<MCP_PROJECT_ID> --region=<MCP_REGION> --port=8081
+   ```
+
+3. 가상환경을 활성화한 두 번째 터미널에서 평가를 실행한다.
+
+   ```bash
+   python -m eval.run_eval
+   ```
+
+로컬 FastAPI 테스트(가상환경 활성화 후): `python -m pytest tests/test_api.py -v`
