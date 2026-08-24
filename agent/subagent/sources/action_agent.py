@@ -3,6 +3,8 @@
 import os
 
 from google.adk.agents import Agent
+from google.adk.agents.callback_context import CallbackContext
+from google.adk.models.llm_request import LlmRequest
 from google.adk.tools.mcp_tool.mcp_session_manager import (
     StreamableHTTPConnectionParams,
 )
@@ -25,6 +27,44 @@ def _mcp_headers(_readonly_context) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
+def _begin_action_attempt(callback_context: CallbackContext):
+    """각 loop iteration을 새 MCP 검색 시도로 초기화한다."""
+    attempt = int(callback_context.state.get("action_attempt", 0)) + 1
+    callback_context.state["action_attempt"] = attempt
+    callback_context.state["action_source_votes"] = {}
+    callback_context.state["action_tool_called"] = False
+    callback_context.state["action_retry_context_pending"] = bool(
+        attempt > 1 and callback_context.state.get("action_retry_hint")
+    )
+    return None
+
+
+def _reset_retry_model_history(
+    callback_context: CallbackContext, llm_request: LlmRequest
+):
+    """재시도 첫 모델 호출에서 이전 액션 도구·응답 기록을 제거한다.
+
+    이전 function call/response가 남아 있으면 모델이 그것을 이미 수행한 현재
+    검색으로 오인해 도구를 다시 호출하지 않는 사례가 재현됐다. 원래 사용자의
+    텍스트 질문만 남기고 retry_hint는 instruction의 state 치환으로 전달한다.
+    현재 iteration에서 search_votes를 호출한 뒤 이어지는 모델 호출에는 적용하지
+    않아 새 function response는 정상적으로 읽을 수 있게 한다.
+    """
+    if not callback_context.state.get("action_retry_context_pending"):
+        return None
+
+    fresh_contents = []
+    for content in llm_request.contents:
+        if content.role != "user":
+            continue
+        text_parts = [part for part in content.parts if getattr(part, "text", None)]
+        if text_parts:
+            fresh_contents.append(type(content)(role="user", parts=text_parts))
+    llm_request.contents = fresh_contents
+    callback_context.state["action_retry_context_pending"] = False
+    return None
+
+
 def _record_action_evidence(tool, args, tool_context, tool_response):
     """실제 MCP 표결 문서를 검증용 session state에 문서 ID별로 보존한다."""
     del args
@@ -37,6 +77,7 @@ def _record_action_evidence(tool, args, tool_context, tool_response):
         if document_id:
             sources[document_id] = vote
     tool_context.state["action_source_votes"] = sources
+    tool_context.state["action_tool_called"] = True
     return None
 
 
@@ -54,6 +95,8 @@ action_agent = Agent(
     name="action_agent",
     model=os.getenv("MODEL", "gemini-3.5-flash"),
     tools=[action_mcp_tools],
+    before_agent_callback=_begin_action_attempt,
+    before_model_callback=_reset_retry_model_history,
     after_tool_callback=_record_action_evidence,
     instruction="""
     너는 국회 본회의 전자투표 근거를 수집하는 표결 전용 액션
