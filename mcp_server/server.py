@@ -130,7 +130,7 @@ def get_utterances(
 @mcp.tool()
 def retrieve_speech_evidence(
     query: str,
-    legislator_id: str | None = None,
+    legislator_id: str,
     page_size: int = 20,
     min_chars: int = 20,
     max_results: int = 10,
@@ -139,9 +139,19 @@ def retrieve_speech_evidence(
 
     반환 순서는 Vertex AI Search 결과 순서이며 날짜 정렬은 수행하지 않습니다.
     """
-    filter_ = None
-    if legislator_id:
-        filter_ = f'legislator_id: ANY("{legislator_id}")'
+    # 인물 중심 서비스이므로 의원 ID 없는 전체 회의록 검색은 허용하지 않는다.
+    # resolve_legislator가 실패했는데 이름만으로 검색하면 비의원 동명이인의
+    # 발언을 의원 발언으로 오인할 수 있다.
+    if not legislator_id.strip():
+        return {
+            "query": query,
+            "candidate_count": 0,
+            "evidence_count": 0,
+            "excluded_short_count": 0,
+            "utterances": [],
+        }
+
+    filter_ = f'legislator_id: ANY("{_filter_value(legislator_id)}")'
 
     return retrieve_speech_evidence_impl(
         query=query,

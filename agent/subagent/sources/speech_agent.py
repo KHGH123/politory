@@ -34,10 +34,11 @@ def _mcp_headers(_readonly_context) -> dict[str, str]:
 
 def _record_speech_evidence(tool, args, tool_context, tool_response):
     """실제 MCP 원문을 검증용 session state에 발언 ID별로 보존한다."""
-    del args
     if not tool.name.endswith("retrieve_speech_evidence"):
         return None
 
+    # 실제 검색에 사용한 ID를 보존해 verifier가 반환 발언의 ID와 대조한다.
+    tool_context.state["speech_requested_legislator_id"] = args.get("legislator_id")
     sources = dict(tool_context.state.get("speech_source_utterances", {}))
     for utterance in collect_tool_utterances(tool_response):
         utterance_id = utterance.get("utterance_id")
