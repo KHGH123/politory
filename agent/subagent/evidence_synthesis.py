@@ -90,6 +90,10 @@ class Source(BaseModel):
     ref_id: str = ""
     type: Literal["primary", "secondary"]
     title: str
+    # 회의록·표결 MCP가 반환한 정규화 의원 ID. 동명이인 평가에서 이름이나
+    # 정당이 같아도 실제로 어떤 의원의 근거가 채택됐는지 확인하기 위해
+    # 최종 출처까지 유지한다. 뉴스처럼 의원 ID가 없는 출처는 null이다.
+    legislator_id: Optional[str] = None
     # excerpt: 소스 에이전트가 도구에서 받은 원문 텍스트를 한 글자도 바꾸지
     # 않고 그대로 옮긴 것(예: search_news의 description). description: 그 위에
     # merge가 전체 맥락에 맞춰 만든 1문장 요약. 이 둘을 분리한 이유 — 원래
@@ -141,15 +145,22 @@ merge = Agent(
       쓰지 않아도 된다 — 이 라벨로만 answer에서 근거를 가리킨다.
     - action_info/speech_info 인용은 type="primary", context_info 인용은
       type="secondary". answer에 실제로 쓸 근거만 최대 5개.
+    - legislator_id: action_info/speech_info 원문에 값이 있으면 그대로 옮기고,
+      없으면 null로 둬라. 이름·정당·문맥만 보고 ID를 추측하지 마라.
     - title: 회의명/법안명/기사 제목.
-    - excerpt: 원문 문장을 한 글자도 바꾸지 않고 그대로 옮긴 "완결된" 문장만
-      (요약·의역·재구성 금지, "..."로 잘린 문장 금지). 따옴표 직접 인용이
-      있으면 그 인용문만 우선 옮기고 앞뒤 서술("~라고 말했다" 등)은 원문
-      그대로가 아니면 붙이지 마라. 완결된 문장이 없으면 null.
+    - excerpt: action_info/speech_info/context_info에 포함된 원문에서 한 글자도
+      바꾸지 않은 "완결된" 문장만 옮겨라(요약·의역·재구성 금지).
+      "..."로 잘렸거나 중간에 끊긴 문장은 사용하지 마라. 따옴표로 묶인
+      완결된 직접 발언이 있으면 인용문만 우선 사용하고, 앞뒤 서술은 원문에
+      있는 경우에만 그대로 붙여라. 완결된 직접 발언이 없으면 완결된 서술을
+      최대 2문장까지 그대로 옮겨라. 원문을 이어 붙이거나 표현을 다듬지 말고,
+      완결된 문장이 하나도 없으면 null로 둬라.
     - description: excerpt와 별개로 네가 쓰는 40자 내외 3인칭 요약
       ("~라고 밝혔다" 등, 따옴표 인용 아님).
     - url, date, page_start, page_end: 원문에 명시된 값만, 없으면 null
       (추측·생성 금지).
+    - answer에서 실제로 인용하지 않은 근거는 sources에 넣지 마라.
+      인용할 근거가 없으면 sources는 빈 배열로 둬라.
 
     ## 2. answer
     - 해석적 판단("입장이 바뀌었다" 등) 금지 — 시간순 사실 나열만, 판단은

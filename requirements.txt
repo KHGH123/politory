@@ -48,3 +48,4 @@ posthog
 
 # --- 개발 편의 ---
 python-multipart==0.0.12
+pytest
