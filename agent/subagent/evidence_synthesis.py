@@ -66,13 +66,19 @@ _no_thinking_config = types.GenerateContentConfig(
 class Source(BaseModel):
     # ref_id: LLM이 이 근거를 처음 언급할 때 스스로 붙이는 짧은 라벨
     # ("s1", "s2"...) — 최종 각주 번호가 아니다. answer는 "[1]" 같은 최종
-    # 번호를 직접 계산하지 않고 "{s1}" 같은 라벨 마커만 남기고, 그 라벨을
+    # 번호를 직접 계산하지 않고 "⟦s1⟧" 같은 라벨 마커만 남기고, 그 라벨을
     # 실제 sources 배열 인덱스로 바꾸는 건 _resolve_footnotes(순수 코드)가
     # 담당한다. LLM이 sources 배열에서 몇 번째인지 스스로 세다가 개수가
     # 늘어날수록(5개 이상) 실수하는 게 반복 실측됐다 — sources를 answer보다
     # 먼저 쓰게 스키마 순서를 바꿔도, instruction을 강화해도 재현됐다(각주
     # 내용은 맞는데 sources 배열 순서와 어긋나는 패턴). "번호 계산" 자체를
     # LLM에서 걷어내 실수가 구조적으로 불가능하게 만드는 게 목적이다.
+    # 마커에 "{}"가 아니라 "⟦⟧"(U+27E6/E7)를 쓰는 이유: ADK의 instruction
+    # 템플릿 엔진이 "{변수명}"을 session state 치환 문법으로 해석해서
+    # "{s1}"을 넣었더니 실제로 KeyError('Context variable not found: `s1`')로
+    # 배포 서비스가 500을 낸 걸 실측으로 확인했다(instructions_utils.py의
+    # inject_session_state). "{"/"}"와 시각적으로도 겹치지 않는 별도
+    # 유니코드 괄호를 써서 이 충돌을 원천 차단한다.
     ref_id: str
     type: Literal["primary", "secondary"]
     title: str
@@ -142,12 +148,14 @@ merge = Agent(
       사용자 몫.
     - 근거 없으면 "수집된 정보가 없습니다".
     - 가장 중요한 사건 위주로, 항목당 1~2문장.
-    - 각주 표시: 문장 끝에 그 근거의 ref_id를 중괄호로 감싸 붙인다(예:
-      "...촉구했다{s1}."). 숫자 번호가 아니라 그 근거를 만들 때 네가 붙인
-      ref_id 문자열 그대로 써라 — 몇 번째 항목인지 세거나 계산하지 마라,
-      실제 번호는 나중에 다른 단계가 매긴다. 여러 근거를 종합한 문장은
-      "{s1}{s2}"처럼 여러 라벨을 붙여도 된다. 서술만 하는 문장(도입부 등)엔
-      라벨을 붙이지 마라. sources에 없는 사실은 answer에 쓰지 마라.
+    - 각주 표시: 문장 끝에 그 근거의 ref_id를 ⟦ ⟧ 괄호로 감싸 붙인다(예:
+      "...촉구했다⟦s1⟧." — 반드시 이 특수 괄호 ⟦ ⟧를 쓰고 다른 괄호 문자는
+      쓰지 마라). 숫자 번호가 아니라 그 근거를 만들 때 네가 붙인 ref_id
+      문자열 그대로 써라 — 몇 번째 항목인지 세거나 계산하지 마라, 실제
+      번호는 나중에 다른 단계가 매긴다. 여러 근거를 종합한 문장은
+      "⟦s1⟧⟦s2⟧"처럼 여러 라벨을 붙여도 된다. 서술만 하는 문장(도입부
+      등)엔 라벨을 붙이지 마라. sources에 없는 사실은 answer에
+      쓰지 마라.
     """,
     output_schema=AgentResponse,
     output_key="draft_response",
@@ -169,7 +177,7 @@ guardrail = Agent(
     sources 배열의 항목 중 url이 null이거나 빈 문자열인 항목은 실제 검색
     결과가 아니라 지어낸(hallucination) 근거일 가능성이 높다. 이런 항목은
     sources 배열에서 제거하고, answer에서 그 항목의 ref_id를 인용하던
-    문장(예: "...밝혔다{s3}.")을 통째로 삭제한다 — 라벨만 떼고 문장을
+    문장(예: "...밝혔다⟦s3⟧.")을 통째로 삭제한다 — 라벨만 떼고 문장을
     남기지 마라, 그 문장의 사실 자체가 근거 없는 것이다. sources가 하나도
     안 남으면 answer도 라벨 딸린 문장을 전부 지우고 "수집된 정보가
     없습니다"로 다시 쓴다. 새 sources를 지어내지 마라 — 제거만 하고 없던
@@ -250,12 +258,21 @@ def _verify_excerpts(callback_context: CallbackContext) -> None:
 # 스키마 순서를 바꾸는 것 모두 시도했지만 재현됐다(각주 내용은 맞는데
 # sources 배열 순서와 다르게 뒤섞이거나, 심하면 완전히 다른 근거를 가리킴).
 # 그래서 "번호 계산" 자체를 LLM에서 걷어낸다: merge/guardrail은 각 source에
-# 안정적인 라벨(ref_id, "s1"/"s2"...)만 붙이고 answer에서는 "{s1}"처럼 그
+# 안정적인 라벨(ref_id, "s1"/"s2"...)만 붙이고 answer에서는 "⟦s1⟧"처럼 그
 # 라벨만 인용한다. 최종 번호는 여기서 sources 배열의 실제 순서를 세어
-# 결정적으로 계산해 "{s1}" -> "[1]"로 치환한다 — LLM이 셈을 틀릴 여지가
+# 결정적으로 계산해 "⟦s1⟧" -> "[1]"로 치환한다 — LLM이 셈을 틀릴 여지가
 # 구조적으로 없다. 동시에 sources 배열에서 ref_id 필드는 내부 처리용이라
 # 최종 응답(API 스키마)에는 노출하지 않고 제거한다.
-_REF_MARKER_PATTERN = re.compile(r"\{(s\d+)\}")
+#
+# 마커에 "{}"가 아니라 "⟦⟧"(U+27E6/E7)를 쓰는 이유: 처음엔 "{s1}"을 썼는데,
+# ADK의 instruction 템플릿 엔진이 "{변수명}"을 무조건 session state 치환
+# 문법으로 해석해서 KeyError('Context variable not found: `s1`')로 배포
+# 서비스가 500을 낸 걸 실측으로 확인했다(google/adk/utils/instructions_utils.py
+# inject_session_state가 instruction 문자열 전체에 그 정규식을 돌린다 —
+# output_schema로 구조화 출력을 받는 대상이라 해도 instruction 렌더링 자체는
+# 피할 수 없었다). "{"/"}"와 안 겹치는 별도 유니코드 괄호로 이 충돌을
+# 원천 차단한다.
+_REF_MARKER_PATTERN = re.compile(r"⟦(s\d+)⟧")
 
 
 def _resolve_footnotes(callback_context: CallbackContext) -> None:
@@ -271,8 +288,8 @@ def _resolve_footnotes(callback_context: CallbackContext) -> None:
     for i, source in enumerate(response.sources, start=1):
         index_by_ref.setdefault(source.ref_id, i)
 
-    # "{s1}{s2}"처럼 라벨이 연달아 나와도 정규식이 하나씩 매칭하므로 각
-    # "{sN}"을 독립적으로 치환한다 — 없는 라벨(guardrail이 제거한 sources를
+    # "⟦s1⟧⟦s2⟧"처럼 라벨이 연달아 나와도 정규식이 하나씩 매칭하므로 각
+    # "⟦sN⟧"을 독립적으로 치환한다 — 없는 라벨(guardrail이 제거한 sources를
     # 가리키던 것 등)은 빈 문자열로 지워 각주 없는 문장으로 남긴다.
     response.answer = _REF_MARKER_PATTERN.sub(
         lambda m: (f"[{index_by_ref[m.group(1)]}]" if m.group(1) in index_by_ref else ""),
