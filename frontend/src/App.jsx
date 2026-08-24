@@ -69,7 +69,11 @@ function App() {
         setError('등록된 국회의원을 찾지 못했습니다. 이름이나 표현을 다시 확인해주세요.')
         setLoading(false)
       } else {
-        setMemberName(data.member_name || text)
+        // 화면2 입력창엔 추출된 인물명(data.member_name)이 아니라 사용자가 실제로
+        // 입력한 원본 질문을 그대로 보여준다 — "이재명 주식 정책에 대해 알려줘"라고
+        // 쳤는데 "이재명"만 남아있으면 뭘 검색 중이었는지 잊어버리는 문제가 있었다.
+        // 인물 특정 자체는 confirmedMemberName(아래)이 별도로 들고 있어 영향 없음.
+        setMemberName(text)
         setConfirmedMemberName(data.member_name || '')
         setConfirmedParty('')
         setMemberCandidates(candidates)
