@@ -79,7 +79,15 @@ class Source(BaseModel):
     # 배포 서비스가 500을 낸 걸 실측으로 확인했다(instructions_utils.py의
     # inject_session_state). "{"/"}"와 시각적으로도 겹치지 않는 별도
     # 유니코드 괄호를 써서 이 충돌을 원천 차단한다.
-    ref_id: str
+    #
+    # 기본값을 둔 이유: _resolve_footnotes가 최종 응답에서 이 필드를
+    # model_dump(exclude=...)로 제거해 session state에 저장하는데, 그 뒤
+    # backend/main.py가 세션을 다시 읽어 AgentResponse.model_validate()로
+    # 재검증할 때 ref_id가 없으면 "Field required" 검증 에러로 500이 나는
+    # 걸 배포 환경에서 실측했다(sources 5개면 5건 validation error). merge/
+    # guardrail 실행 중에는 LLM이 여전히 값을 채우므로 기본값이 그 단계의
+    # 동작에는 영향이 없다.
+    ref_id: str = ""
     type: Literal["primary", "secondary"]
     title: str
     # excerpt: 소스 에이전트가 도구에서 받은 원문 텍스트를 한 글자도 바꾸지
