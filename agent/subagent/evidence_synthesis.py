@@ -38,6 +38,7 @@ speech_agent가 tools=[] 상태라 지어낸 내용인데도 프론트가 이미
 안 되므로, 프론트의 필터링은 이중 방어선으로 그대로 남겨둔다(backend/main.py
 없이 순수 프론트 레벨 — frontend/src/screens/ResultsScreen.jsx의 url 필터).
 """
+import logging
 import os
 import re
 from typing import Literal, Optional
@@ -46,6 +47,8 @@ from google.adk.agents import Agent, SequentialAgent
 from google.adk.agents.callback_context import CallbackContext
 from google.genai import types
 from pydantic import BaseModel
+
+logger = logging.getLogger(__name__)
 
 _model = os.getenv("MODEL", "gemini-3.5-flash")
 
@@ -300,6 +303,20 @@ def _resolve_footnotes(callback_context: CallbackContext) -> None:
         return None
 
     response = raw if isinstance(raw, AgentResponse) else AgentResponse.model_validate(raw)
+
+    # TEMP DEBUG(각주-출처 불일치 조사용, 문제 해결되면 제거): 배포 환경에서만
+    # 재현되고 로컬에서는 재현이 안 돼 merge/guardrail이 실제로 무엇을 냈는지
+    # 확인할 방법이 없었다 — Cloud Run stdout은 자동으로 로그에 잡히므로
+    # print로 남긴다. 응답 텍스트(공개 뉴스 발췌 수준)를 로그에 남기므로
+    # 진단이 끝나면 제거할 것.
+    ref_ids = [s.ref_id for s in response.sources]
+    markers_in_answer = _REF_MARKER_PATTERN.findall(response.answer)
+    logger.warning(
+        "footnote_debug ref_ids=%r markers_in_answer=%r duplicate_ref_ids=%r",
+        ref_ids,
+        markers_in_answer,
+        len(ref_ids) != len(set(ref_ids)),
+    )
 
     # ref_id -> 1-based 인덱스. 중복 ref_id는 먼저 나온 것을 기준으로 삼는다
     # (merge/guardrail이 실수로 같은 라벨을 두 번 썼더라도 결과가 결정적이게).
