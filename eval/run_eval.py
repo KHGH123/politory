@@ -39,6 +39,7 @@ import asyncio
 import json
 import os
 import re
+import time
 from pathlib import Path
 from typing import Literal
 
@@ -68,6 +69,7 @@ class EvalRow(BaseModel):
 
     id: str | None = None
     category: str = "uncategorized"
+    evaluation_mode: Literal["quality", "safety"] = "quality"
     question: str
     member_name: str | None = None
     keyword: str | None = None
@@ -77,6 +79,8 @@ class EvalRow(BaseModel):
     max_sources: int | None = None
     expect_no_evidence: bool = False
     forbidden_phrases: list[str] = Field(default_factory=list)
+    required_answer_phrases: list[str] = Field(default_factory=list)
+    expected_legislator_id: str | None = None
 
 
 class GeminiJudge(DeepEvalBaseLLM):
@@ -254,11 +258,34 @@ def _run_deterministic_checks(row: EvalRow, answer: str, sources) -> dict[str, d
         "found=" + (", ".join(found_phrases) if found_phrases else "none"),
     )
 
+    missing_required_phrases = [
+        phrase for phrase in row.required_answer_phrases if phrase and phrase not in answer
+    ]
+    record(
+        "required_answer_phrases",
+        not missing_required_phrases,
+        "missing="
+        + (", ".join(missing_required_phrases) if missing_required_phrases else "none"),
+    )
+
+    if row.expected_legislator_id:
+        primary_ids = {
+            source.legislator_id
+            for source in sources
+            if source.type == "primary" and source.legislator_id
+        }
+        record(
+            "expected_legislator_id",
+            primary_ids == {row.expected_legislator_id},
+            f"actual={sorted(primary_ids) or 'none'}, expected={row.expected_legislator_id}",
+        )
+
     return checks
 
 
 async def _run_case(row: EvalRow, judge: GeminiJudge) -> dict:
     question = row.question
+    started_at = time.perf_counter()
     agent_response = await _run_agent(question, row.member_name, row.keyword)
     contexts = _sources_to_contexts(agent_response.sources, row.member_name)
 
@@ -269,15 +296,20 @@ async def _run_case(row: EvalRow, judge: GeminiJudge) -> dict:
         expected_output=row.ground_truth,
     )
 
-    metrics = [
-        FaithfulnessMetric(model=judge, include_reason=True),
-        AnswerRelevancyMetric(model=judge, include_reason=True),
-    ]
-    if row.ground_truth:
-        metrics += [
-            ContextualPrecisionMetric(model=judge, include_reason=True),
-            ContextualRecallMetric(model=judge, include_reason=True),
+    # 존재하지 않는 의원·근거 없음·프롬프트 인젝션은 정보를 만들지 않는 것이
+    # 성공인데 AnswerRelevancy는 이를 0점으로 평가한다. safety 문항은 LLM
+    # 관련성 평균에서 제외하고 결정적 조건만 검사한다.
+    metrics = []
+    if row.evaluation_mode == "quality":
+        metrics = [
+            FaithfulnessMetric(model=judge, include_reason=True),
+            AnswerRelevancyMetric(model=judge, include_reason=True),
         ]
+        if row.ground_truth:
+            metrics += [
+                ContextualPrecisionMetric(model=judge, include_reason=True),
+                ContextualRecallMetric(model=judge, include_reason=True),
+            ]
 
     scores: dict[str, dict] = {}
     for metric in metrics:
@@ -292,12 +324,14 @@ async def _run_case(row: EvalRow, judge: GeminiJudge) -> dict:
     return {
         "id": row.id,
         "category": row.category,
+        "evaluation_mode": row.evaluation_mode,
         "question": question,
         "answer": agent_response.answer,
         "source_count": len(agent_response.sources),
         "scores": scores,
         "deterministic_checks": deterministic_checks,
         "deterministic_passed": deterministic_passed,
+        "duration_seconds": round(time.perf_counter() - started_at, 3),
     }
 
 
@@ -308,6 +342,16 @@ async def _run_all(rows: list[EvalRow]) -> list[dict]:
     delay_seconds = max(0.0, float(os.getenv("EVAL_DELAY_SECONDS", "0")))
     selected_rows = rows[start_index - 1 :]
 
+    # 재개 실행이면 이전 체크포인트에서 시작 인덱스 앞 문항만 복원한다.
+    # 다른 부분 실행 결과나 오래된 문항은 섞지 않는다.
+    if start_index > 1 and _REPORT_PATH.exists():
+        prior_ids = {row.id for row in rows[: start_index - 1] if row.id}
+        try:
+            previous_results = json.loads(_REPORT_PATH.read_text(encoding="utf-8"))
+            results = [result for result in previous_results if result.get("id") in prior_ids]
+        except (json.JSONDecodeError, OSError):
+            results = []
+
     for i, row in enumerate(selected_rows, start_index):
         label = row.id or f"case-{i:02d}"
         print(f"[{i}/{len(rows)}] {label} ({row.category}) - {row.question}")
@@ -317,6 +361,7 @@ async def _run_all(rows: list[EvalRow]) -> list[dict]:
             result = {
                 "id": row.id,
                 "category": row.category,
+                "evaluation_mode": row.evaluation_mode,
                 "question": row.question,
                 "answer": None,
                 "source_count": None,
@@ -324,6 +369,7 @@ async def _run_all(rows: list[EvalRow]) -> list[dict]:
                 "deterministic_checks": {},
                 "deterministic_passed": False,
                 "error": f"{type(exc).__name__}: {exc}",
+                "duration_seconds": None,
             }
             print(f"  ERROR: {type(exc).__name__}: {exc}")
 

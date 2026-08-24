@@ -66,6 +66,10 @@ _no_thinking_config = types.GenerateContentConfig(
 class Source(BaseModel):
     type: Literal["primary", "secondary"]
     title: str
+    # 회의록·표결 MCP가 반환한 정규화 의원 ID. 동명이인 평가에서 이름이나
+    # 정당이 같아도 실제로 어떤 의원의 근거가 채택됐는지 확인하기 위해
+    # 최종 출처까지 유지한다. 뉴스처럼 의원 ID가 없는 출처는 null이다.
+    legislator_id: Optional[str] = None
     # excerpt: 소스 에이전트가 도구에서 받은 원문 텍스트를 한 글자도 바꾸지
     # 않고 그대로 옮긴 것(예: search_news의 description). description: 그 위에
     # merge가 전체 맥락에 맞춰 만든 1문장 요약. 이 둘을 분리한 이유 — 원래
@@ -133,6 +137,8 @@ merge = Agent(
     sources 필드:
     - action_info/speech_info에서 인용한 근거는 type="primary", context_info에서
       인용한 근거는 type="secondary"로 항목을 만들어라.
+    - legislator_id: action_info/speech_info 원문에 있으면 값을 그대로 옮기고,
+      없으면 null로 둬라. 이름이나 문맥만 보고 ID를 추측하지 마라.
     - title: 회의명/법안명/기사 제목 등 근거를 식별할 수 있는 제목.
     - excerpt: action_info/speech_info/context_info 안에 있는 원문 텍스트에서
       "완결된" 문장만 골라 한 글자도 바꾸지 말고 그대로 옮겨라(요약·의역·재구성
