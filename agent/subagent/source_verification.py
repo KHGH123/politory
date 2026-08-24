@@ -128,6 +128,7 @@ def _check_speech_against_mcp(callback_context: CallbackContext):
     valid, hint = validate_speech_info(
         callback_context.state.get("speech_info"),
         callback_context.state.get("speech_source_utterances", {}),
+        callback_context.state.get("speech_requested_legislator_id"),
     )
     if valid:
         return None
