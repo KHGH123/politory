@@ -10,6 +10,8 @@ from google.adk.tools.mcp_tool.mcp_toolset import McpToolset
 from google.auth.transport.requests import Request
 from google.oauth2.id_token import fetch_id_token
 
+from .action_evidence_validation import collect_tool_votes
+
 
 MCP_URL = os.getenv("MCP_URL", "http://localhost:8080/mcp")
 MCP_AUDIENCE = os.getenv("MCP_AUDIENCE", "")
@@ -21,6 +23,21 @@ def _mcp_headers(_readonly_context) -> dict[str, str]:
         return {}
     token = fetch_id_token(Request(), MCP_AUDIENCE)
     return {"Authorization": f"Bearer {token}"}
+
+
+def _record_action_evidence(tool, args, tool_context, tool_response):
+    """실제 MCP 표결 문서를 검증용 session state에 문서 ID별로 보존한다."""
+    del args
+    if not tool.name.endswith("search_votes"):
+        return None
+
+    sources = dict(tool_context.state.get("action_source_votes", {}))
+    for vote in collect_tool_votes(tool_response):
+        document_id = vote.get("document_id")
+        if document_id:
+            sources[document_id] = vote
+    tool_context.state["action_source_votes"] = sources
+    return None
 
 
 action_mcp_tools = McpToolset(
@@ -37,12 +54,19 @@ action_agent = Agent(
     name="action_agent",
     model=os.getenv("MODEL", "gemini-3.5-flash"),
     tools=[action_mcp_tools],
+    after_tool_callback=_record_action_evidence,
     instruction="""
     너는 국회 본회의 전자투표 근거를 수집하는 표결 전용 액션
     에이전트다. 법안 발의·공동발의, 의원 프로필, 위원회 표결은
     현재 데이터에 없으므로 다루지 않는다. 반드시 MCP의 search_votes를
     실제로 호출한 결과만 사용하라. 일반 상식이나 학습 데이터로
     표결 내용을 보충하거나 추측하지 마라.
+
+    이 에이전트가 실행될 때마다 search_votes를 최소 한 번 반드시 호출한다.
+    이전 iteration의 도구 결과나 action_info를 그대로 재사용해 답하지 않는다.
+    action_retry_hint가 있으면 그 지시대로 검색어 또는 필터를 바꾼 뒤
+    search_votes를 다시 호출해야 한다. 재검색 호출 없이 이전의 빈 결과를
+    반복 출력해서는 안 된다.
 
     ## 검색 절차
     1. 질문에서 의원명, 안건·정책 주제, 표결 선택을 파악한다.
@@ -88,6 +112,7 @@ action_agent = Agent(
     {
       "evidence": [
         {
+          "document_id": "...",
           "vote_id": "...",
           "document_type": "assembly_vote_member|assembly_vote_summary",
           "member_name": "...",

@@ -22,11 +22,10 @@ URL 대조 검증(context_verifier 전용): context_agent가 호출한 search_ne
 정규식으로 추출해 이 목록과 대조한다. 목록에 없는 URL이 하나라도 있으면 LLM
 호출 전에 즉시 불통과 처리(retry_hint 작성)하고 exit_loop 콜백도 건너뛴다 —
 "그럴듯해 보이는 가짜 URL"은 LLM 판단보다 문자열 대조가 훨씬 확실하기 때문이다.
-speech/action 쪽은 tool이 URL을 반환하는 구조가 아직 없어 이 검증은 context에만
-적용한다(tool이 붙으면 같은 패턴을 확장할 수 있음).
-
-TODO(오케스트레이션): speech/action_agent의 output_schema가 확정되면 "tool
-호출 자체가 없었는지"를 판별하는 규칙 기반 사전 필터를 그쪽에도 확장하는 것을 검토.
+speech는 발언 ID·인용·메타데이터를 MCP 전체 발언과 대조하고, action은
+document_id·choice·집계·날짜·본문·PDF 위치를 MCP 표결 문서와 대조한다.
+두 검증 모두 도구 호출 결과가 없거나 필드가 달라지면 LLM verifier 호출 전에
+불통과 처리하고, 마지막 실패 시 미검증 info를 빈 evidence로 교체한다.
 """
 import os
 import re
@@ -37,6 +36,7 @@ from google.adk.tools import exit_loop
 from google.genai import types
 
 from .sources import speech_agent, action_agent, context_agent
+from .sources.action_evidence_validation import validate_action_info
 from .sources.speech_evidence_validation import validate_speech_info
 
 _model = os.getenv("MODEL", "gemini-3.5-flash")
@@ -134,6 +134,19 @@ def _check_speech_against_mcp(callback_context: CallbackContext):
     # 마지막 재시도까지 실패해 LoopAgent가 종료되더라도 미검증 내용이
     # merge 단계로 넘어가지 않게 즉시 안전한 빈 결과로 교체한다.
     callback_context.state["speech_info"] = '{"evidence": []}'
+    return types.Content(parts=[types.Part(text=hint)])
+
+
+def _check_action_against_mcp(callback_context: CallbackContext):
+    """action_info의 표결 필드를 실제 MCP search_votes 결과와 대조한다."""
+    valid, hint = validate_action_info(
+        callback_context.state.get("action_info"),
+        callback_context.state.get("action_source_votes", {}),
+    )
+    if valid:
+        return None
+    # 마지막 재시도까지 실패해도 미검증 표결이 merge로 넘어가지 않게 한다.
+    callback_context.state["action_info"] = '{"evidence": []}'
     return types.Content(parts=[types.Part(text=hint)])
 
 
@@ -242,6 +255,9 @@ context_verifier.before_agent_callback = _make_url_check_callback(
 
 # speech_verifier: LLM 판단 전에 실제 MCP 전체 발언과 결정적으로 대조한다.
 speech_verifier.before_agent_callback = _check_speech_against_mcp
+
+# action_verifier: LLM 판단 전에 실제 MCP 표결 필드와 결정적으로 대조한다.
+action_verifier.before_agent_callback = _check_action_against_mcp
 
 speech_verified_loop = LoopAgent(
     name="speech_verified_loop",
