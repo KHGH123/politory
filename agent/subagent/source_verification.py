@@ -139,6 +139,16 @@ def _check_speech_against_mcp(callback_context: CallbackContext):
 
 def _check_action_against_mcp(callback_context: CallbackContext):
     """action_info의 표결 필드를 실제 MCP search_votes 결과와 대조한다."""
+    if not callback_context.state.get("action_tool_called"):
+        callback_context.state["action_info"] = '{"evidence": []}'
+        return types.Content(
+            parts=[
+                types.Part(
+                    text="이번 검색 시도에서 search_votes가 호출되지 않았다. "
+                    "이전 결과를 재사용하지 말고 MCP 도구를 다시 호출하라."
+                )
+            ]
+        )
     valid, hint = validate_action_info(
         callback_context.state.get("action_info"),
         callback_context.state.get("action_source_votes", {}),
