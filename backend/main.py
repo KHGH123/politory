@@ -318,23 +318,39 @@ async def _run_agent(question: str, member_name: str | None, keyword: str | None
         app_name="politory_agent", user_id="backend", session_id=session_id
     )
 
-    final_answer: AgentResponse | None = None
-    async for event in _agent_runner.run_async(
+    async for _event in _agent_runner.run_async(
         user_id="backend",
         session_id=session_id,
         new_message=genai_types.Content(
             role="user", parts=[genai_types.Part(text=combined_question)]
         ),
     ):
-        if event.author == "guardrail" and event.content and event.content.parts:
-            text = "".join(p.text or "" for p in event.content.parts)
-            if text:
-                final_answer = AgentResponse.model_validate_json(text)
+        pass  # 최종 결과는 아래에서 세션 state를 직접 읽는다 (이유는 주석 참고)
 
-    if final_answer is None:
+    # guardrail이 직접 생성한 이벤트(event.content)가 아니라 실행이 끝난 뒤
+    # 세션을 다시 조회해서 state["final_answer"]를 읽는다. guardrail의
+    # after_agent_callback(_verify_excerpts, _resolve_footnotes)이 state를
+    # 고쳐도 반환값은 None이라, ADK가 그 상태 변경만으로 만드는 이벤트는
+    # content=None이다(google/adk/agents/base_agent.py의
+    # _handle_after_agent_callback 확인) — event.content로 걸러 읽으면 그
+    # 상태 변경 이전의 guardrail 원본 LLM 출력을 그대로 쓰게 되어, excerpt
+    # 정합성 검증과 각주 재계산이 실제 API 응답에 반영되지 않는 버그가 있었다.
+    # 세션을 다시 읽으면 콜백이 반영된 최종 state를 확실히 얻는다.
+    session = await _session_service.get_session(
+        app_name="politory_agent", user_id="backend", session_id=session_id
+    )
+    final_state_answer = session.state.get("final_answer") if session else None
+
+    if final_state_answer is None:
         # 파이프라인이 끝까지 돌았는데 guardrail 출력이 안 잡힌 비정상 케이스 —
         # 사용자에게는 원인불명 500 대신 "답변을 만들지 못했다"로 명확히 알린다.
         return AgentResponse(answer="답변을 생성하지 못했습니다. 다시 시도해주세요.", sources=[])
+
+    final_answer = (
+        final_state_answer
+        if isinstance(final_state_answer, AgentResponse)
+        else AgentResponse.model_validate(final_state_answer)
+    )
 
     # merge instruction이 answer는 "시간순으로 나열하라"고 지시하지만 sources
     # 배열 자체의 정렬은 강제하지 않아서, 실제로 날짜가 뒤섞여 나오는 걸
