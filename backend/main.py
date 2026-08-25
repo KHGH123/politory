@@ -83,11 +83,13 @@ class _ClassifyLLMOutput(BaseModel):
     keywords: list[KeywordSuggestion] = []
     # LLM은 검색어 구조화만 담당하고, 실제 의원 후보는 BigQuery에서 검증한다.
     district_guess: str | None = None
-    # 질문에 의원 이름이 없을 때, 관련 있을 법한 상임위원회 이름 하나(예: "국토교통위원회").
-    # 이것도 DB 검증 없이 그대로 응답에 노출하면 안 되므로(위원회 자체는 지어낼 수 없는
-    # 고정된 목록이라 hallucination 우려는 적지만, 오타/변형 표기 가능성은 있음) classify()가
-    # 이 값으로 BigQuery를 조회해 실제 소속 의원만 member_candidates로 반환한다.
-    committee_guess: str | None = None
+    # 인물 없이 정책만 있는 질문에서, 그 정책과 관련 있다고 LLM이 아는 실존
+    # 국회의원 이름 후보(최대 3명). committee_guess(위원회 소속 여부로 대충
+    # 추천)보다 이게 정책 자체와 더 직접적으로 연관된 추천이다 — 다만 LLM이
+    # 이름을 지어내거나 착각할 수 있으니, classify()가 각 이름을 BigQuery
+    # mps 테이블로 실존 검증한 것만 최종 후보로 남긴다("인물도 db 안에 있는
+    # 사람들 중에서"라는 요구사항).
+    policy_person_guesses: list[str] = []
 
 
 # ---- MP(국회의원) BigQuery 조회 공용 모델 ----
@@ -237,34 +239,6 @@ def _find_members_by_district(district_guess: str, limit: int = 10) -> list[Memb
     ]
 
 
-def _find_members_by_committee(committee_guess: str, limit: int = 3) -> list[MemberCandidate]:
-    """상임위원회 이름으로 소속 의원을 찾는다 (정책 질문에서 인물을 역으로 추천할 때 사용).
-
-    committee 컬럼은 "연금개혁 특별위원회, 보건복지위원회"처럼 여러 위원회가
-    콤마로 붙어있을 수 있어 LIKE로 부분일치한다.
-    """
-    job = _bq_client.query(
-        f"SELECT name, legislator_id, party, district, image_url FROM `{_MEMBERS_TABLE}` "
-        f"WHERE committee LIKE @pattern ORDER BY term_count DESC, name LIMIT @limit",
-        job_config=bigquery.QueryJobConfig(
-            query_parameters=[
-                bigquery.ScalarQueryParameter("pattern", "STRING", f"%{committee_guess}%"),
-                bigquery.ScalarQueryParameter("limit", "INT64", limit),
-            ]
-        ),
-    )
-    return [
-        MemberCandidate(
-            name=row.name,
-            legislator_id=row.legislator_id,
-            party=row.party,
-            district=row.district,
-            image_url=row.image_url,
-        )
-        for row in job.result()
-    ]
-
-
 def _get_member_profile(
     name: str,
     party: str | None = None,
@@ -320,12 +294,14 @@ def classify(request: ClassifyRequest) -> ClassifyResponse:
 - 불충분하고 member_name이 있으면, 그 의원과 관련될 만한 정책 키워드를
   최대 3개까지 추천해라(keywords). 각 키워드에는 왜 이 키워드를 추천하는지
   20자 이내로 짧게 이유를 적어라. 없는 사실을 지어내지 마라.
-- member_name은 없지만 district_guess가 있으면 sufficient=false로 하고,
-  committee_guess는 비워라. 의원 후보는 서버가 지역구 DB 조회로 결정한다.
-- 불충분하고 member_name이 없으면(정책/이슈만 있고 특정 인물이 없는 질문),
-  keywords는 비워두고 대신 이 정책/이슈를 주로 다루는 대한민국 국회 상임위원회
-  이름 하나를 committee_guess에 채워라(예: "국토교통위원회", "보건복지위원회",
-  "기획재정위원회" 등 실제 상임위 명칭 그대로). 확신이 없어도 가장 가까운 걸로 채워라."""
+- member_name은 없지만 district_guess가 있으면 sufficient=false로 하라.
+  의원 후보는 서버가 지역구 DB 조회로 결정한다.
+- 불충분하고 member_name도 district_guess도 없으면(정책/이슈만 있고 특정
+  인물·지역구가 없는 질문), 이 정책/이슈와 관련될 만한 키워드를 최대 3개까지
+  keywords에 추천해라. 추가로, 이 정책/이슈를 실제로 대표발의하거나 관련
+  상임위 활동, 발언 등으로 다뤘다고 알고 있는 대한민국 22대 국회의원이
+  있으면 이름만 policy_person_guesses에 최대 3명까지 적어라. 확실히 아는
+  사람만 적고, 없으면 비워둬라. 없는 사실을 지어내지 마라."""
 
     response = _genai_client.models.generate_content(
         model=settings.MODEL,
@@ -374,39 +350,32 @@ def classify(request: ClassifyRequest) -> ClassifyResponse:
             result.sufficient = False
             result.member_candidates = district_matches
             result.keywords = []
-    elif llm_result.committee_guess:
-        # 인물 없이 정책만 있는 질문 — "검색축은 인물"이라는 원칙에 따라 정책 키워드
-        # 대신 그 정책을 다루는 상임위 소속 실제 의원을 추천 카드로 보여준다.
-        # committee_guess 자체는 DB에 없을 수도 있으니(오타/변형 표기), 매칭되는
-        # 의원이 없으면 원래 하던 대로 정책 키워드로 폴백한다.
-        committee_matches = _find_members_by_committee(llm_result.committee_guess)
-        if committee_matches:
-            result.member_candidates = committee_matches
+    elif llm_result.policy_person_guesses:
+        # 순수 정책 질문에서 LLM이 이름을 지어내거나 착각했을 수 있으니, 각
+        # 이름을 BigQuery로 검증해 정확히 1명으로 특정되는 것만 후보로
+        # 남긴다(0건=환각, 2건 이상=동명이인이라 애매해서 둘 다 버린다 —
+        # "인물도 db 안에 있는 사람들 중에서"라는 요구사항).
+        validated: list[MemberCandidate] = []
+        seen_ids: set[str] = set()
+        for guess_name in llm_result.policy_person_guesses[:3]:
+            matches = _find_members_by_name(guess_name)
+            if len(matches) == 1 and matches[0].legislator_id not in seen_ids:
+                validated.append(matches[0])
+                seen_ids.add(matches[0].legislator_id)
+        if validated:
+            result.member_candidates = validated
+            # keywords가 남아있으면 프론트(RefineScreen.jsx)가 "keywordSuggestions
+            # 존재 = 동명이인" 휴리스틱으로 라벨을 잘못 "동명이인 — 찾으시는 분을
+            # 선택하세요"로 표시한다. 이 후보들은 이름이 겹치는 동일인이 아니라
+            # 정책과 관련된 서로 다른 의원 추천이므로 비워서 "관련 의원" 라벨이
+            # 뜨게 한다.
             result.keywords = []
 
-    if not result.member_name and not result.member_candidates and llm_result.committee_guess:
-        # 인물이 없거나(정책만 있는 질문) DB에 없는 인물이면, "검색축은 인물"이라는
-        # 원칙에 따라 정책 키워드 대신 그 정책을 다루는 상임위 소속 실제 의원을
-        # 추천 카드로 보여준다. committee_guess 자체는 DB에 없을 수도 있으니
-        # (오타/변형 표기), 매칭되는 의원이 없으면 정책 키워드로 폴백한다 —
-        # 단, member_not_found(실존하지 않는 인물을 지칭한 경우)에는 이미 위에서
-        # keywords를 비웠으니 그대로 빈 채로 둔다(엉뚱한 사람 이름에 낚여
-        # 상임위를 추천하는 것도 부적절하므로 committee_guess 자체를 쓰지 않는다).
-        if not member_not_found:
-            committee_matches = _find_members_by_committee(llm_result.committee_guess)
-            if committee_matches:
-                result.member_candidates = committee_matches
-                result.keywords = []
-
-    # keywords는 "인물은 확정됐고 주제만 좁히면 되는" 경우에만 의미가 있다.
-    # 프롬프트로 "member_name 없으면 keywords 비워두라"고 지시했지만 LLM이
-    # 그 지시를 어기고 member_name=null인데 keywords를 채우는 경우가 실측으로
-    # 확인됐다(예: "윤석열이 뭐하는 사람이야" -> member_name=null인데
-    # keywords로 "국정운영" 등 채워 넣음 — 위의 member_not_found 분기가 막는
-    # 경로와 달리 애초에 LLM이 member_name을 null로 낸 경우라 그 분기를 타지
-    # 않고 새어나갔다). LLM 판단에 기대지 않고 여기서 무조건 강제한다.
-    if not result.member_name:
-        result.keywords = []
+    # keywords는 "인물이 실제로 있는(확정됐거나, 애초에 정책만 있던) 경우"에만
+    # 의미가 있다. member_not_found(존재하지 않는 인물을 지칭한 경우)에는 이미
+    # 위에서 keywords를 비웠으니 그대로 둔다 — 여기서 다시 전부 지워버리면
+    # 순수 정책 질문("교통비 완화 정책"처럼 인물이 아예 없는 질문)까지 같이
+    # 비워져서 화면2에 카드가 하나도 없는 빈 화면이 된다.
 
     return result
 
