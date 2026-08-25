@@ -34,6 +34,7 @@ def _set_classify_llm_result(backend_module, **overrides):
         "sufficient": True,
         "member_name": None,
         "keywords": [],
+        "district_guess": None,
         "committee_guess": None,
         **overrides,
     }
@@ -100,6 +101,46 @@ def test_classify_returns_homonym_candidates(client, backend_module, monkeypatch
         "krna:H7X3372O",
         "krna:8BF5855P",
     }
+
+
+def test_classify_returns_district_candidates(client, backend_module, monkeypatch):
+    _set_classify_llm_result(
+        backend_module,
+        sufficient=False,
+        district_guess="분당갑",
+    )
+    monkeypatch.setattr(
+        backend_module,
+        "_find_members_by_district",
+        lambda district: [
+            backend_module.MemberCandidate(
+                name="안철수",
+                legislator_id="krna:district-test",
+                party="국민의힘",
+                district="경기 성남시분당구갑",
+            )
+        ],
+    )
+
+    response = client.post(
+        "/api/classify",
+        json={"question": "분당갑 지역구 의원을 찾아줘"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["sufficient"] is False
+    assert body["member_name"] is None
+    assert body["keywords"] == []
+    assert body["member_candidates"] == [
+        {
+            "name": "안철수",
+            "legislator_id": "krna:district-test",
+            "party": "국민의힘",
+            "district": "경기 성남시분당구갑",
+            "image_url": None,
+        }
+    ]
 
 
 def test_classify_clears_suggestions_for_unknown_member(
