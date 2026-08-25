@@ -24,7 +24,22 @@ function LandingScreen({ question, onQuestionChange, onSubmit, loading, error })
         </div>
       </form>
 
-      {loading && <p className="hint">확인 중...</p>}
+      {/* RefineScreen의 진행 배지(.hint-badge/.hint-dots, App.css)와 같은
+          스타일을 재사용한다 — 여기는 /api/classify 단일 호출이라 로그로
+          쌓을 단계가 없으므로 배지 하나만 보여준다. data-stage 없이 두면
+          기본 brass 톤으로 표시된다. */}
+      {loading && (
+        <p className="hint">
+          <span className="hint-badge">
+            <span className="hint-dots" aria-hidden="true">
+              <span />
+              <span />
+              <span />
+            </span>
+            <span className="hint-text">질문 확인 중</span>
+          </span>
+        </p>
+      )}
       {error && <p className="error">{error}</p>}
     </div>
   )
