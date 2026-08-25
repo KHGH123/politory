@@ -1,0 +1,176 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  api-test:
+    name: Backend API test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Run API and evidence validation tests
+        run: |
+          python -m pytest \
+            tests/test_api.py \
+            agent/subagent/sources/test_speech_evidence_validation.py \
+            agent/subagent/sources/test_action_evidence_validation.py \
+            -v
+
+  agent-eval:
+    name: Agent quality evaluation
+    if: github.event_name == 'workflow_dispatch'
+    needs: api-test
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    permissions:
+      contents: read
+      id-token: write
+
+    env:
+      GOOGLE_GENAI_USE_VERTEXAI: "TRUE"
+      GOOGLE_CLOUD_PROJECT: ${{ vars.GOOGLE_CLOUD_PROJECT }}
+      GOOGLE_CLOUD_LOCATION: ${{ vars.GOOGLE_CLOUD_LOCATION }}
+      MODEL: ${{ vars.MODEL }}
+      SEARCH_PROJECT_ID: ${{ vars.SEARCH_PROJECT_ID }}
+      SEARCH_APP_ID: ${{ vars.SEARCH_APP_ID }}
+      SEARCH_LOCATION: ${{ vars.SEARCH_LOCATION }}
+      ACTION_SEARCH_APP_ID: ${{ vars.ACTION_SEARCH_APP_ID }}
+      BIGQUERY_PROJECT: ${{ vars.BIGQUERY_PROJECT }}
+      BIGQUERY_DATASET: ${{ vars.BIGQUERY_DATASET }}
+      BIGQUERY_MEMBERS_TABLE: ${{ vars.BIGQUERY_MEMBERS_TABLE }}
+      BQ_PROJECT_ID: ${{ vars.BQ_PROJECT_ID }}
+      BQ_DATASET: ${{ vars.BQ_DATASET }}
+      NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
+      NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
+      MCP_URL: http://localhost:8081/mcp
+      MCP_AUDIENCE: ""
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up Google Cloud CLI
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Start private MCP proxy
+        shell: bash
+        env:
+          MCP_SERVICE_NAME: ${{ vars.MCP_SERVICE_NAME }}
+          MCP_PROJECT_ID: ${{ vars.MCP_PROJECT_ID }}
+          MCP_REGION: ${{ vars.MCP_REGION }}
+        run: |
+          gcloud run services proxy "$MCP_SERVICE_NAME" \
+            --project="$MCP_PROJECT_ID" \
+            --region="$MCP_REGION" \
+            --port=8081 > "$RUNNER_TEMP/mcp-proxy.log" 2>&1 &
+
+          for attempt in {1..30}; do
+            if curl --silent --output /dev/null http://localhost:8081/mcp; then
+              exit 0
+            fi
+            sleep 2
+          done
+
+          cat "$RUNNER_TEMP/mcp-proxy.log"
+          exit 1
+
+      - name: Run agent evaluation
+        run: python -m eval.run_eval
+
+      - name: Enforce quality gate
+        env:
+          MIN_FAITHFULNESS: "0.7"
+          MIN_ANSWER_RELEVANCY: "0.7"
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import sys
+          from pathlib import Path
+
+          report_path = Path("eval/eval_report.json")
+          results = json.loads(report_path.read_text(encoding="utf-8"))
+
+          errors = [result for result in results if result.get("error")]
+          deterministic_failures = [
+              result for result in results if not result.get("deterministic_passed", False)
+          ]
+
+          thresholds = {
+              "FaithfulnessMetric": float(os.environ["MIN_FAITHFULNESS"]),
+              "AnswerRelevancyMetric": float(os.environ["MIN_ANSWER_RELEVANCY"]),
+          }
+          score_failures = []
+          for metric_name, threshold in thresholds.items():
+              scores = [
+                  result["scores"][metric_name]["score"]
+                  for result in results
+                  if metric_name in result.get("scores", {})
+              ]
+              if not scores:
+                  score_failures.append(f"{metric_name}: no scores")
+                  continue
+              average = sum(scores) / len(scores)
+              print(f"{metric_name}: average={average:.3f}, required>={threshold:.3f}")
+              if average < threshold:
+                  score_failures.append(
+                      f"{metric_name}: average={average:.3f}, required>={threshold:.3f}"
+                  )
+
+          if errors or deterministic_failures or score_failures:
+              for result in errors:
+                  print(f"ERROR {result.get('id')}: {result['error']}")
+              for result in deterministic_failures:
+                  print(f"DETERMINISTIC FAILURE: {result.get('id')}")
+              for failure in score_failures:
+                  print(f"SCORE FAILURE: {failure}")
+              sys.exit(1)
+          PY
+
+      - name: Upload evaluation report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-evaluation-report
+          path: eval/eval_report.json
+          if-no-files-found: warn
+          retention-days: 14
