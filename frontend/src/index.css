@@ -18,7 +18,7 @@
 
   --serif: 'Noto Serif KR', serif;
   --sans: 'Pretendard', -apple-system, 'Segoe UI', Roboto, sans-serif;
-  --mono: 'IBM Plex Mono', ui-monospace, Consolas, monospace;
+  --mono: 'IBM Plex Mono', 'Pretendard', 'Noto Sans KR', ui-monospace, Consolas, monospace;
 
   color-scheme: light;
   font-synthesis: none;
