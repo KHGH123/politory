@@ -51,7 +51,7 @@ class KeywordSuggestion(BaseModel):
 
 
 class MemberCandidate(BaseModel):
-    """화면2 선택 카드용 — 동명이인 특정 또는 정책 기반 의원 추천, 두 경우 모두 재사용."""
+    """화면2 선택 카드용 — 이름·지역구·정책 기반 의원 추천에 공통으로 사용."""
 
     name: str
     legislator_id: str | None = None
@@ -81,6 +81,8 @@ class _ClassifyLLMOutput(BaseModel):
     sufficient: bool
     member_name: str | None = None
     keywords: list[KeywordSuggestion] = []
+    # LLM은 검색어 구조화만 담당하고, 실제 의원 후보는 BigQuery에서 검증한다.
+    district_guess: str | None = None
     # 질문에 의원 이름이 없을 때, 관련 있을 법한 상임위원회 이름 하나(예: "국토교통위원회").
     # 이것도 DB 검증 없이 그대로 응답에 노출하면 안 되므로(위원회 자체는 지어낼 수 없는
     # 고정된 목록이라 hallucination 우려는 적지만, 오타/변형 표기 가능성은 있음) classify()가
@@ -166,6 +168,75 @@ def _find_members_by_name(name: str) -> list[MemberCandidate]:
     ]
 
 
+_DISTRICT_ADMIN_SUFFIX_RE = re.compile(r"특별자치도|특별자치시|특별시|광역시|도|시|군|구")
+
+
+def _normalize_district(district: str) -> str:
+    """지역구 표기의 공백·행정구역 접미사 차이를 검색 가능한 형태로 줄인다."""
+    normalized = re.sub(r"지역구|선거구|국회의원", "", district)
+    normalized = re.sub(r"[\s·ㆍ,()\-]", "", normalized)
+    return _DISTRICT_ADMIN_SUFFIX_RE.sub("", normalized)
+
+
+def _find_members_by_district(district_guess: str, limit: int = 10) -> list[MemberCandidate]:
+    """정규화한 지역구로 BigQuery의 실제 의원 후보를 정확도순 조회한다."""
+    normalized_guess = _normalize_district(district_guess)
+    if len(normalized_guess) < 2:
+        return []
+
+    job = _bq_client.query(
+        f"""
+        WITH normalized_members AS (
+          SELECT
+            name,
+            legislator_id,
+            party,
+            image_url,
+            district,
+            term_count,
+            REGEXP_REPLACE(
+              REGEXP_REPLACE(district, r'[\\s·ㆍ,()\\-]', ''),
+              r'특별자치도|특별자치시|특별시|광역시|도|시|군|구',
+              ''
+            ) AS normalized_district
+          FROM `{_MEMBERS_TABLE}`
+          WHERE district IS NOT NULL AND district != ''
+        )
+        SELECT name, legislator_id, party, image_url, district
+        FROM normalized_members
+        WHERE normalized_district = @district
+           OR ENDS_WITH(normalized_district, @district)
+           OR STRPOS(normalized_district, @district) > 0
+        ORDER BY
+          CASE
+            WHEN normalized_district = @district THEN 0
+            WHEN ENDS_WITH(normalized_district, @district) THEN 1
+            ELSE 2
+          END,
+          ABS(LENGTH(normalized_district) - LENGTH(@district)),
+          term_count DESC,
+          name
+        LIMIT @limit
+        """,
+        job_config=bigquery.QueryJobConfig(
+            query_parameters=[
+                bigquery.ScalarQueryParameter("district", "STRING", normalized_guess),
+                bigquery.ScalarQueryParameter("limit", "INT64", limit),
+            ]
+        ),
+    )
+    return [
+        MemberCandidate(
+            name=row.name,
+            legislator_id=row.legislator_id,
+            party=row.party,
+            image_url=row.image_url,
+            district=row.district,
+        )
+        for row in job.result()
+    ]
+
+
 def _find_members_by_committee(committee_guess: str, limit: int = 3) -> list[MemberCandidate]:
     """상임위원회 이름으로 소속 의원을 찾는다 (정책 질문에서 인물을 역으로 추천할 때 사용).
 
@@ -237,6 +308,11 @@ def classify(request: ClassifyRequest) -> ClassifyResponse:
 이 질문에서 국회의원 이름으로 보이는 고유명사가 있으면 정당명·직함(대표, 원내대표 등)을
 제외하고 member_name에 채워라 (있을 때만, 확신이 없어도 일단 채워라).
 
+질문에 대한민국 국회의원 지역구나 행정구역이 직접 언급되어 있으면 district_guess에
+채워라. 가능하면 "서울 강남구갑", "경기 성남시분당구갑"처럼 시·도와 갑/을/병까지
+포함한 선거구 표기로 정리하되, 질문에 없는 지역이나 갑/을/병을 추측해서 붙이지 마라.
+단순 정책명에 포함된 지명은 지역구로 취급하지 마라.
+
 이 질문이 특정 국회의원 이름과 구체적인 정책/이슈를 모두 포함해서
 바로 의정활동을 조회할 수 있을 만큼 충분히 구체적인지 판단해라.
 
@@ -244,6 +320,8 @@ def classify(request: ClassifyRequest) -> ClassifyResponse:
 - 불충분하고 member_name이 있으면, 그 의원과 관련될 만한 정책 키워드를
   최대 3개까지 추천해라(keywords). 각 키워드에는 왜 이 키워드를 추천하는지
   20자 이내로 짧게 이유를 적어라. 없는 사실을 지어내지 마라.
+- member_name은 없지만 district_guess가 있으면 sufficient=false로 하고,
+  committee_guess는 비워라. 의원 후보는 서버가 지역구 DB 조회로 결정한다.
 - 불충분하고 member_name이 없으면(정책/이슈만 있고 특정 인물이 없는 질문),
   keywords는 비워두고 대신 이 정책/이슈를 주로 다루는 대한민국 국회 상임위원회
   이름 하나를 committee_guess에 채워라(예: "국토교통위원회", "보건복지위원회",
@@ -288,6 +366,14 @@ def classify(request: ClassifyRequest) -> ClassifyResponse:
             result.member_candidates = candidates
         else:
             result.legislator_id = candidates[0].legislator_id
+    elif llm_result.district_guess:
+        # LLM이 만든 지역구 문자열을 의원 확정값으로 신뢰하지 않고, BigQuery의
+        # 실제 district 컬럼과 대조한 후보만 사용자가 선택하도록 반환한다.
+        district_matches = _find_members_by_district(llm_result.district_guess)
+        if district_matches:
+            result.sufficient = False
+            result.member_candidates = district_matches
+            result.keywords = []
     elif llm_result.committee_guess:
         # 인물 없이 정책만 있는 질문 — "검색축은 인물"이라는 원칙에 따라 정책 키워드
         # 대신 그 정책을 다루는 상임위 소속 실제 의원을 추천 카드로 보여준다.

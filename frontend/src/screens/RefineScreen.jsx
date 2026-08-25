@@ -111,6 +111,12 @@ function RefineScreen({
               </div>
             </>
           )}
+
+          {memberName && memberCandidates.length === 0 && keywordSuggestions.length === 0 && (
+            <button type="submit" className="search-button" disabled={loading}>
+              조회하기
+            </button>
+          )}
         </form>
 
         {/* 파이프라인 구조(agent/agent.py: query_processing -> fetch(병렬
