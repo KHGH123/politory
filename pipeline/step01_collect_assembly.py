@@ -26,7 +26,7 @@ from urllib.parse import parse_qs, urlencode, urlparse
 from urllib.request import Request, urlopen
 
 from google.cloud import bigquery, storage
-from google.api_core.exceptions import Forbidden, Unauthorized
+from google.api_core.exceptions import Forbidden, PreconditionFailed, Unauthorized
 from google.auth.exceptions import RefreshError
 
 
@@ -471,25 +471,40 @@ class Collector:
         self.bucket = self.storage.bucket(config.bucket)
         self.bigquery = bigquery.Client(project=config.project)
 
-    def request(self, url: str, params: dict[str, Any] | None = None) -> bytes:
+    def request(
+        self,
+        url: str,
+        params: dict[str, Any] | None = None,
+        *,
+        timeout_seconds: float = 90,
+        attempts: int = 5,
+    ) -> bytes:
         """재시도와 지연을 적용해 국회 API 또는 공식 PDF를 내려받는다."""
+        display_url = url
         if params:
             url = f"{url}?{urlencode(params)}"
         request = Request(url, headers={"User-Agent": USER_AGENT})
-        last_error: Exception | None = None
-        for attempt in range(5):
+        for attempt in range(attempts):
             try:
-                with urlopen(request, timeout=90) as response:
+                with urlopen(request, timeout=timeout_seconds) as response:
                     data = response.read()
                 if self.cfg.request_delay:
                     time.sleep(self.cfg.request_delay)
                 return data
             except (HTTPError, URLError, TimeoutError) as exc:
-                last_error = exc
-                if attempt == 4:
+                print(
+                    f"request failed {attempt + 1}/{attempts}: "
+                    f"{display_url} ({type(exc).__name__})",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                if attempt == attempts - 1:
                     break
                 time.sleep(2**attempt)
-        raise RuntimeError(f"request failed after retries: {url}") from last_error
+        # Do not chain the urllib exception: its URL can contain the API key.
+        raise RuntimeError(
+            f"request failed after {attempts} attempts: {display_url}"
+        ) from None
 
     def api_rows(self, meeting_type: str, meeting_date: date) -> tuple[list[dict[str, Any]], bytes | None]:
         """회의 종류·날짜별 API 전체 페이지를 읽고 원응답도 보존한다."""
@@ -509,7 +524,14 @@ class Collector:
                 "DAE_NUM": self.cfg.assembly_no,
                 "CONF_DATE": meeting_date.isoformat(),
             }
-            raw = self.request(f"{API_BASE}/{endpoint}", params)
+            # Discovery responses are small. Fail the run promptly when the
+            # official API is unreachable instead of waiting up to eight minutes.
+            raw = self.request(
+                f"{API_BASE}/{endpoint}",
+                params,
+                timeout_seconds=20,
+                attempts=3,
+            )
             payload = json.loads(raw)
             if "RESULT" in payload:
                 if payload["RESULT"].get("CODE") == "INFO-200":
@@ -552,7 +574,16 @@ class Collector:
 
     def upload(self, path: str, data: bytes, content_type: str) -> str:
         """원응답이나 PDF 바이트를 GCS에 올리고 gs:// URI를 반환한다."""
-        self.bucket.blob(path).upload_from_string(data, content_type=content_type)
+        try:
+            self.bucket.blob(path).upload_from_string(
+                data,
+                content_type=content_type,
+                if_generation_match=0,
+            )
+        except PreconditionFailed:
+            # Immutable archive: retries reuse the first successfully stored
+            # official response instead of requiring overwrite/delete access.
+            pass
         return f"gs://{self.cfg.bucket}/{path}"
 
     def existing_meeting_ids(self) -> set[str]:

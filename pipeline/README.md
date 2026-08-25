@@ -1,5 +1,8 @@
 # 국회 회의록 BigQuery·Vertex AI Search 파이프라인
 
+현재 DB·GCP 서비스의 선택 이유와 대안은 [TECHNOLOGY_CHOICES.md](TECHNOLOGY_CHOICES.md)에
+간단히 정리했다.
+
 공식 국회 회의록 PDF를 GCS에 보존하고, PDF에서 페이지·발언을 추출하여 BigQuery와
 Vertex AI Search용 문서를 만드는 코드다. HTML 회의록 뷰어는 원문 수집에 사용하지 않는다.
 

@@ -6,15 +6,16 @@
 
 - Cloud Run Job: `assembly-incremental`
 - 리전: `asia-northeast3`
-- 이미지: `asia-northeast3-docker.pkg.dev/proj-aj04-211200020328/cloud-run-source-deploy/assembly-incremental:20260825-02`
-- 이미지 digest: `sha256:c1a409a22b6ca248c4cd18e608745394b970064ca76a28468e5c7d9f0dee6d7f`
+- 이미지: `asia-northeast3-docker.pkg.dev/proj-aj04-211200020328/cloud-run-source-deploy/assembly-incremental:20260825-04`
+- 이미지 digest: `sha256:3dbd24baea02e164601acce11de84686942b3458f3f324902c60ad1e535eb6a9`
 - 서비스 계정: `assembly-incremental-job@proj-aj04-211200020328.iam.gserviceaccount.com`
 - 모드: 드라이런 (`--apply` 없음)
-- 실행 이력: 드라이런 1회 성공 (`assembly-incremental-x5jjb`, 데이터 변경 없음)
-- Scheduler: 생성하지 않음
+- 실행 이력: 실제 증분 실행 성공 (`assembly-incremental-dpsxx`, 회의 9건·검색 문서 6,653건 반영)
+- Scheduler: `assembly-incremental-daily`, 매일 06:00 (`Asia/Seoul`), 실행 override 권한 보완 필요
 
-국회 API Secret, BigQuery/GCS 쓰기 권한, Vertex 데이터 스토어 ID를 확인하기 전에는
-`--apply`를 추가하지 않는다.
+`assembly-api-key` Secret과 BigQuery/GCS 최소 권한을 연결했다. Job 기본값은 드라이런으로
+유지하고 Scheduler 호출 본문에서만 `--apply`를 전달한다. Vertex 데이터 스토어 ID는
+설정하지 않아 Vertex import는 실행하지 않는다.
 
 국회 API에서 최근 회의를 조회하고, 신규 또는 이전에 실패한 `meeting_id`만 다시 처리하는
 Cloud Run Job용 코드다. 기존 전체 구축 스크립트의 수집·PDF 파싱 로직은 재사용하고,
@@ -55,6 +56,10 @@ ASSEMBLY_API_KEY=... python -m incremental_pipeline.main --apply
 
 기본 조회 범위는 실행일을 포함한 최근 7일이다. 날짜 범위가 연도를 넘으면 국회 수집기의
 연도 제한에 맞춰 자동으로 두 번 실행한다.
+
+국회 API 조회는 요청당 20초, 최대 3회만 재시도하고 실패 원인을 키가 제거된 로그로 남긴다.
+PDF 다운로드는 파일 크기를 고려해 기존의 긴 제한시간을 사용한다. GCS 원본은 객체가 없을
+때만 생성하므로 재시도 중 기존 원본을 덮어쓰거나 삭제하지 않는다.
 
 ## 컨테이너 빌드
 
@@ -165,4 +170,4 @@ VERTEX_IMPORT → COMPLETE` 순서로 바뀐다. 모든 게시가 끝난 뒤에�
 - 기존 `search_documents` 또는 `vote_search_documents` 전체 재생성
 - `legislators` 마스터 자동 덮어쓰기
 - 파이프라인 실행 중 컨테이너 빌드 또는 GCP 배포
-- Cloud Scheduler 자동 생성
+- 파이프라인 실행 중 Cloud Scheduler 생성·수정
