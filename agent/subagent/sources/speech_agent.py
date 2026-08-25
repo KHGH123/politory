@@ -19,6 +19,15 @@ from google.oauth2.id_token import fetch_id_token
 
 from .speech_evidence_validation import collect_tool_utterances
 
+# thinking_budget=0을 실측 시도했다가 되돌림: action_agent.py와 같은
+# 근거(evidence_synthesis.py의 merge/guardrail 30% 단축 선례)로 껐더니
+# speech_loop 자체는 9~13초대로 빨라졌지만(기존 15~16초), speech_verifier가
+# "speech_info를 지정된 JSON 객체 형식으로만 다시 출력하라"는 형식 오류로
+# 재시도하는 게 2회 실행 모두에서 재현됐다(1회차 1번, 2회차 2회 연속).
+# action_agent는 같은 변경으로 이 문제가 없었던 것과 대조적 — speech_agent의
+# 출력 스키마(nested evidence 배열)가 더 복잡해서 thinking 없이 형식을
+# 안정적으로 못 지키는 것으로 보인다. 속도보다 안정성을 우선해 되돌린다.
+
 
 MCP_URL = os.getenv("MCP_URL", "http://localhost:8080/mcp")
 MCP_AUDIENCE = os.getenv("MCP_AUDIENCE", "")

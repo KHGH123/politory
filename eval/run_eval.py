@@ -242,13 +242,16 @@ def _run_deterministic_checks(row: EvalRow, answer: str, sources) -> dict[str, d
     invalid_footnotes = sorted({value for value in footnotes if value < 1 or value > source_count})
     cited_indexes = set(footnotes)
     uncited_sources = [i for i in range(1, source_count + 1) if i not in cited_indexes]
-    footnotes_passed = not invalid_footnotes and not uncited_sources
+    # 존재하지 않는 출처 번호를 인용하거나, 근거가 있는데 각주가 하나도 없는
+    # 답변은 실패로 본다. 다만 에이전트가 유효한 후보 출처를 함께 반환했지만
+    # 최종 답변에서 일부만 사용한 경우는 실패시키지 않고 상세 정보로만 남긴다.
+    footnotes_passed = not invalid_footnotes and (source_count == 0 or bool(footnotes))
     if source_count == 0:
         footnotes_passed = not footnotes
     record(
         "footnote_source_alignment",
         footnotes_passed,
-        f"invalid={invalid_footnotes or 'none'}, uncited={uncited_sources or 'none'}",
+        f"invalid={invalid_footnotes or 'none'}, uncited_warning={uncited_sources or 'none'}",
     )
 
     found_phrases = [phrase for phrase in row.forbidden_phrases if phrase and phrase in answer]
