@@ -264,6 +264,26 @@ class MinutesParser(HTMLParser):
         spans = [item for item in iter_nodes(node) if "spk_sub" in node_classes(item)]
         text = clean_text("\n".join(node_text(span) for span in spans))
         anchor = next((span.attrs.get("id") for span in spans if span.attrs.get("id")), None)
+        profile_link = next(
+            (
+                item.attrs.get("href")
+                for item in iter_nodes(node)
+                if item.tag == "a" and "/members/" in item.attrs.get("href", "")
+            ),
+            None,
+        )
+        profile_image = next(
+            (
+                item.attrs.get("src")
+                for item in iter_nodes(node)
+                if item.tag == "img" and item.attrs.get("src")
+            ),
+            None,
+        )
+        area_node = next(
+            (item for item in iter_nodes(node) if "area" in node_classes(item)),
+            None,
+        )
         return {
             "section": "body",
             "block_type": "speech",
@@ -271,6 +291,9 @@ class MinutesParser(HTMLParser):
             "member_id": node.attrs.get("data-mem_id") or None,
             "name": clean_text(node.attrs.get("data-name", "")) or None,
             "position": clean_text(node.attrs.get("data-pos", "")) or None,
+            "profile_url": profile_link,
+            "profile_image_url": profile_image,
+            "district_label": node_text(area_node).strip("() ") if area_node else None,
             "text": text,
             "source_anchor": anchor or node.attrs.get("id") or None,
         }

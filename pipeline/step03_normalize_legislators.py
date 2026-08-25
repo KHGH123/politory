@@ -18,6 +18,7 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from google.cloud import bigquery, storage
+from google.api_core.exceptions import NotFound
 
 
 API_BASE = "https://open.assembly.go.kr/portal/openapi"
@@ -43,8 +44,8 @@ def is_legislative_role(position: str | None) -> bool:
     return bool(
         re.fullmatch(
             r"(?:소)?위원장(?:대리|직무대리|직무대행)?"
-            r"|.+위원장(?:대리|직무대리|직무대행)"
-            r"|의장(?:대리|직무대리|직무대행)",
+            r"|.+위원장(?:대리|직무대리|직무대행)?"
+            r"|의장(?:대리|직무대리|직무대행)?",
             value,
         )
     )
@@ -156,8 +157,11 @@ def build_identity_map(
     identity_rows: list[Any],
     legislators: list[dict[str, Any]],
     collected_at: str,
+    verified_source_links: dict[tuple[int, str], tuple[str, float]] | None = None,
 ) -> list[dict[str, Any]]:
     """회의별 PDF 발언자 표기를 공식 의원 ID에 보수적으로 연결한다."""
+    verified_source_links = verified_source_links or {}
+    valid_legislator_ids = {member["legislator_id"] for member in legislators}
     by_name: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for member in legislators:
         for alias in member["_name_aliases"]:
@@ -192,7 +196,13 @@ def build_identity_map(
         method = "INSUFFICIENT_EVIDENCE"
         confidence: float | None = None
 
-        if source_speaker_id and len(candidate_ids_by_source_id[source_speaker_id]) > 1:
+        verified = verified_source_links.get((assembly_no, source_speaker_id or ""))
+        if verified and verified[0] in valid_legislator_ids:
+            legislator_id = verified[0]
+            status = "MATCHED"
+            method = "VERIFIED_OFFICIAL_WEB_PROFILE"
+            confidence = verified[1]
+        elif source_speaker_id and len(candidate_ids_by_source_id[source_speaker_id]) > 1:
             status = "AMBIGUOUS"
             method = "SOURCE_ID_NAME_COLLISION"
         elif len(candidates) > 1:
@@ -241,6 +251,36 @@ def build_identity_map(
     if len(ids) != len(set(ids)):
         raise RuntimeError("speaker identity IDs are not unique")
     return result
+
+
+def load_verified_source_links(
+    client: bigquery.Client, project: str, dataset: str, assembly_no: int
+) -> dict[tuple[int, str], tuple[str, float]]:
+    """Load additive official-web mappings when the enrichment table exists."""
+    try:
+        rows = client.query(
+            f"""
+            SELECT assembly_no, source_speaker_id, ANY_VALUE(legislator_id) legislator_id,
+                   MAX(confidence) confidence, COUNT(DISTINCT legislator_id) id_count
+            FROM `{project}.{dataset}.source_speaker_members`
+            WHERE assembly_no=@assembly_no
+            GROUP BY assembly_no, source_speaker_id
+            HAVING id_count=1
+            """,
+            job_config=bigquery.QueryJobConfig(
+                query_parameters=[
+                    bigquery.ScalarQueryParameter("assembly_no", "INT64", assembly_no)
+                ]
+            ),
+        ).result()
+    except NotFound:
+        return {}
+    return {
+        (int(row.assembly_no), str(row.source_speaker_id)): (
+            str(row.legislator_id), float(row.confidence or 1.0)
+        )
+        for row in rows
+    }
 
 
 def identity_source_query(project: str, dataset: str, assembly_no: int) -> str:
@@ -380,19 +420,31 @@ def publish_table(
 
 
 def apply_updates(client: bigquery.Client, project: str, dataset: str) -> None:
-    """MATCHED 매핑만 사용해 utterances.legislator_id를 갱신한다."""
+    """Preserve existing IDs and fill only non-conflicting MATCHED identities."""
     prefix = f"{project}.{dataset}"
     sql = f"""
       BEGIN TRANSACTION;
 
-      UPDATE `{prefix}.utterances`
-      SET legislator_id = NULL
-      WHERE legislator_id IS NOT NULL;
+      ASSERT NOT EXISTS (
+        SELECT 1
+        FROM `{prefix}.utterances` AS u
+        JOIN `{prefix}.speaker_identity_map` AS i
+          ON u.meeting_id = i.meeting_id
+         AND COALESCE(u.source_speaker_id, '') = COALESCE(i.source_speaker_id, '')
+         AND TRIM(REGEXP_REPLACE(NORMALIZE(COALESCE(u.speaker_name, ''), NFKC), r'\\s+', ' '))
+             = COALESCE(i.speaker_name, '')
+         AND TRIM(REGEXP_REPLACE(NORMALIZE(COALESCE(u.speaker_position, ''), NFKC), r'\\s+', ' '))
+             = COALESCE(i.speaker_position, '')
+        WHERE i.resolution_status = 'MATCHED'
+          AND u.legislator_id IS NOT NULL
+          AND u.legislator_id != i.legislator_id
+      ) AS 'existing utterance legislator_id conflicts with rebuilt identity map';
 
       UPDATE `{prefix}.utterances` AS u
       SET legislator_id = i.legislator_id
       FROM `{prefix}.speaker_identity_map` AS i
       WHERE i.resolution_status = 'MATCHED'
+        AND u.legislator_id IS NULL
         AND u.meeting_id = i.meeting_id
         AND COALESCE(u.source_speaker_id, '') = COALESCE(i.source_speaker_id, '')
         AND TRIM(REGEXP_REPLACE(NORMALIZE(COALESCE(u.speaker_name, ''), NFKC), r'\\s+', ' '))
@@ -478,7 +530,12 @@ def main() -> int:
             identity_source_query(args.project, args.dataset, args.assembly_no)
         ).result()
     )
-    identities = build_identity_map(identities_source, legislators, collected_at)
+    verified_source_links = load_verified_source_links(
+        client, args.project, args.dataset, args.assembly_no
+    )
+    identities = build_identity_map(
+        identities_source, legislators, collected_at, verified_source_links
+    )
     print_report(legislators, identities)
     if not args.apply:
         print("dry run only; no BigQuery or GCS changes made")

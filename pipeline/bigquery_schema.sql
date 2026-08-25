@@ -167,6 +167,44 @@ CREATE TABLE IF NOT EXISTS `proj-aj04-211200020328.assembly.speaker_identity_map
 CLUSTER BY assembly_no, source_speaker_id, speaker_name, legislator_id
 OPTIONS(description = "회의록 출처별 발언자 ID를 정규화 의원 ID에 연결하는 매핑");
 
+CREATE TABLE IF NOT EXISTS `proj-aj04-211200020328.assembly.source_speaker_members`
+(
+  assembly_no INT64 NOT NULL,
+  source_speaker_id STRING NOT NULL,
+  speaker_name STRING,
+  legislator_id STRING NOT NULL,
+  profile_url STRING,
+  profile_image_url STRING,
+  resolution_method STRING NOT NULL,
+  confidence FLOAT64,
+  verified_at TIMESTAMP NOT NULL
+)
+CLUSTER BY assembly_no, source_speaker_id, legislator_id
+OPTIONS(description = "공식 웹 회의록 발언자 ID와 정규화 의원 ID의 검증된 연결");
+
+CREATE TABLE IF NOT EXISTS `proj-aj04-211200020328.assembly.speaker_identity_evidence`
+(
+  evidence_id STRING NOT NULL,
+  meeting_id STRING NOT NULL,
+  assembly_no INT64 NOT NULL,
+  speaker_name STRING,
+  speaker_position STRING,
+  utterance_count INT64 NOT NULL,
+  source_speaker_id STRING NOT NULL,
+  legislator_id STRING NOT NULL,
+  resolution_method STRING NOT NULL,
+  confidence FLOAT64,
+  text_similarity FLOAT64,
+  source_url STRING NOT NULL,
+  source_html_gcs_uri STRING,
+  source_sha256 STRING NOT NULL,
+  parser_version STRING NOT NULL,
+  validation_status STRING NOT NULL,
+  collected_at TIMESTAMP NOT NULL
+)
+CLUSTER BY meeting_id, source_speaker_id, legislator_id
+OPTIONS(description = "PDF 발언과 공식 웹 발언자 ID를 연결한 검증 근거");
+
 CREATE TABLE IF NOT EXISTS `proj-aj04-211200020328.assembly.search_documents`
 (
   id STRING NOT NULL,
