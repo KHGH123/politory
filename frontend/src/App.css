@@ -89,12 +89,344 @@ body {
   font: inherit;
 }
 
+/* LandingScreen의 진행 배지 컨테이너(/api/classify 비스트리밍 로딩).
+   RefineScreen도 같은 .hint-badge/.hint-dots를 재사용하지만 로그(.hint-log)
+   대신 배지 하나만 가운데 정렬한다. */
 .hint {
   margin-top: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* 진행 로그 — App.jsx가 도착한 progress 이벤트를 순서대로 쌓은 progressLog를
+   위에서 아래로 나열한다("문구 하나를 계속 갈아끼우지 말고 아래로 계속
+   쌓아달라"는 피드백 반영). 가운데 정렬 폼 아래 세로로 붙는 미니 타임라인
+   느낌 — 폭을 폼과 맞춰 너무 퍼지지 않게 한다. */
+.hint-log {
+  margin: 20px auto 0;
+  max-width: 420px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  list-style: none;
+  padding: 0;
+}
+
+/* 진행 상태 배지(로그 한 줄) — 파이프라인 단계마다 다른 색조를 준다
+   (progressStageOf가 문구를 stage 키로 분류해 data-stage로 내려줌).
+   "글자 색이 계속 똑같아 밋밋하다"는 피드백을 받아, 법안/회의록/뉴스/종합/
+   검증 단계가 서로 다른 색으로 보이게 했다 — 사용자가 지금 어떤 종류의
+   자료를 훑는 중인지 색만 보고도 감을 잡을 수 있다. 기본값(data-stage
+   없음, 예: "질문 분석 중...")은 brass로 폴백. 가장 최근 줄만 진하게,
+   지난 줄(.is-past)은 옅게 가라앉혀 "지금 여기가 현재"임을 드러낸다. */
+.hint-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 16px;
+  border-radius: 999px;
+  background: var(--stage-bg, var(--brass-bg));
+  border: 1px solid var(--stage-border, var(--brass-light));
+  box-shadow: 0 1px 0 rgba(169, 130, 46, 0.08);
+  animation: fadeSlideIn 0.3s ease-out;
+  transition:
+    background-color 0.35s ease,
+    border-color 0.35s ease,
+    opacity 0.35s ease;
+}
+.hint-badge.is-past {
+  opacity: 0.45;
+  box-shadow: none;
+}
+/* 아직 그 레인에 이벤트가 안 온 상태의 자리표시. is-past보다도 더 옅게 —
+   "이 레인도 곧 시작될 자리"라는 인상만 주고 시선을 끌지 않는다. */
+.hint-badge.is-waiting {
+  background: transparent;
+  border: 1px dashed var(--line);
+  box-shadow: none;
+  animation: none;
+}
+.hint-badge.is-waiting .hint-text {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/* 병렬 조회 레인(법안·표결/회의록/뉴스)을 나란히 배치한다 — 실제로
+   ParallelAgent라 동시에 실행되는 걸 세로 로그 하나로만 보여주면 순서만
+   읽혀서 "동시에 돈다"는 인상이 안 생긴다("병렬 처리니까 그거에 맞게
+   로그"라는 피드백). 3칸 그리드로 나란히 두면 레이아웃 자체가 "이 셋은
+   같이 진행 중"임을 설명 없이 전달한다. 좁은 화면에서는 1칸으로 접어
+   세로로 쌓는다(각 레인 안의 세로 로그는 유지). */
+.lane-grid {
+  margin: 14px auto 0;
+  max-width: 640px;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+.lane {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0; /* 그리드 자식이 내용물 때문에 넘치지 않게 */
+}
+.lane-label {
   font-family: var(--mono);
-  font-size: 12.5px;
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
   color: var(--muted);
   text-align: center;
+}
+.lane-log {
+  margin: 0;
+  max-width: none;
+}
+.lane-log .hint-badge {
+  /* 레인 폭에 맞춰 배지가 꽉 차게 — 가운데 정렬 pill이 아니라 좌측 정렬
+     카드처럼 보이게 해서 좁은 컬럼 안에서도 문구가 읽기 편하다. */
+  width: 100%;
+  box-sizing: border-box;
+  justify-content: flex-start;
+  padding: 7px 10px;
+  border-radius: 10px;
+}
+.lane-log .hint-text {
+  font-size: 11.5px;
+  white-space: normal;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 560px) {
+  .lane-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* stage별 --stage-* 색상 정의. .hint-badge와 .stepper-chip(아래) 둘 다
+   [data-stage]로 이 값을 물려받는다 — 로그 배지와 스테퍼 칩이 같은 팔레트를
+   쓰게 해서 "지금 이 배지가 스테퍼의 어느 칸과 같은 일인지" 색으로도
+   연결되게 한다. */
+/* 다섯 stage 모두 같은 패턴(밝은 tint 배경 + 중간 톤 보더 + 짙은 글자색)으로
+   통일한다 — 예전엔 context/synthesis/verify 셋만 짙은 배경(#2f4a3d 등)을
+   써서 action/speech(밝은 배경)와 톤이 안 맞고 화면에서 유독 무겁게
+   튀었다("색이 진하다"는 피드백). 색상환은 유지하되 밝기만 다 같이
+   맞췄다. */
+[data-stage='action'] {
+  --stage-bg: #e7edf5;
+  --stage-border: #9db3cc;
+  --stage-fg: var(--navy-2, #2e4460);
+}
+[data-stage='speech'] {
+  /* brass(놋쇠/노란빛)였다가 "회의록은 노란색 말고 다른 색으로"라는
+     피드백으로 와인(자주) 계열로 바꿨다 — action(파랑)/context(녹색)/
+     synthesis(보라)/verify(적갈색)와 겹치지 않는 다섯 번째 색상. */
+  --stage-bg: #f5e9f0;
+  --stage-border: #c98fb0;
+  --stage-fg: #8a3d68;
+}
+[data-stage='context'] {
+  --stage-bg: #e9f2ec;
+  --stage-border: #9dc4ab;
+  --stage-fg: #3d6b4f;
+}
+[data-stage='synthesis'] {
+  --stage-bg: #eeeaf5;
+  --stage-border: #b7a4d6;
+  --stage-fg: #5b4a80;
+}
+[data-stage='verify'] {
+  --stage-bg: #f5e9ea;
+  --stage-border: #cf9a9c;
+  --stage-fg: #8b3a3a;
+}
+
+.hint-text {
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  color: var(--stage-fg, var(--brass));
+  transition: color 0.35s ease;
+}
+
+/* 진행 중임을 보여주는 점 3개 — 문구가 몇 초씩 같은 값으로 멈춰 있어도
+   (예: 재검색 루프 도중) 화면이 살아있다는 걸 보여준다. */
+.hint-dots {
+  display: inline-flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.hint-dots span {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--stage-fg, var(--brass-light));
+  animation: hintDotPulse 1.2s ease-in-out infinite;
+  transition: background-color 0.35s ease;
+}
+.hint-dots span:nth-child(2) {
+  animation-delay: 0.15s;
+}
+.hint-dots span:nth-child(3) {
+  animation-delay: 0.3s;
+}
+@keyframes hintDotPulse {
+  0%,
+  80%,
+  100% {
+    opacity: 0.3;
+    transform: scale(0.85);
+  }
+  40% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hint-text {
+    animation: none;
+  }
+  .hint-dots span {
+    animation: none;
+    opacity: 0.6;
+  }
+}
+
+/* 파이프라인 구조 트래커 — root_agent(agent/agent.py)의 실제 실행 순서를
+   그대로 5칸으로 그린다: 질문 분석 -> 자료 조회(병렬 3갈래) -> 근거 종합 ->
+   답변 검증. "에이전트 구조가 좀 더 시각화됐으면"이라는 피드백으로 추가.
+   진행 로그(.hint-log, 실시간 문구)는 "지금 뭘 하는지" 텍스트로 알려주고,
+   이 트래커는 "전체 중 어디쯤인지" 지도 역할을 한다 — 둘이 같은 화면에서
+   보완적으로 작동한다. */
+.stepper {
+  margin: 24px auto 0;
+  max-width: 480px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  list-style: none;
+  padding: 0;
+  counter-reset: none;
+}
+
+.stepper-node {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  position: relative;
+  text-align: center;
+}
+
+/* 칸 사이를 잇는 선 — 다음 칸으로 향하는 절반만 그려서, 인접한 두 노드가
+   각자 자기 오른쪽 절반을 채우면 전체 연결선이 완성된다. 완료된 구간만
+   실선으로 진하게, 나머지는 옅은 점선으로 "아직 안 왔다"는 걸 보여준다. */
+.stepper-node:not(:last-child)::after {
+  content: '';
+  position: absolute;
+  top: 7px;
+  left: calc(50% + 14px);
+  right: calc(-50% + 14px);
+  height: 1px;
+  background: var(--line);
+  border-top: 1px dashed var(--line);
+  transition: border-color 0.3s ease;
+}
+.stepper-node.status-done:not(:last-child)::after {
+  border-top-style: solid;
+  border-top-color: var(--brass-light);
+}
+
+.stepper-dot {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid var(--line);
+  background: #fff;
+  flex-shrink: 0;
+  transition:
+    background-color 0.3s ease,
+    border-color 0.3s ease;
+  position: relative;
+  z-index: 1;
+}
+.stepper-node.status-active .stepper-dot {
+  border-color: var(--brass);
+  background: var(--brass-bg);
+  animation: hintDotPulse 1.2s ease-in-out infinite;
+}
+.stepper-node.status-done .stepper-dot {
+  border-color: var(--brass);
+  background: var(--brass);
+}
+/* 완료 체크 표시 — 별도 아이콘 없이 순수 CSS로 그린 작은 체크. */
+.stepper-node.status-done .stepper-dot::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  left: 2px;
+  width: 7px;
+  height: 3px;
+  border-left: 2px solid #fff;
+  border-bottom: 2px solid #fff;
+  transform: rotate(-45deg);
+}
+
+.stepper-label {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--muted);
+  white-space: nowrap;
+  transition: color 0.3s ease;
+}
+.stepper-node.status-active .stepper-label,
+.stepper-node.status-done .stepper-label {
+  color: var(--ink);
+  font-weight: 500;
+}
+
+/* 자료 조회 칸 — ParallelAgent(fetch)를 그대로 반영해 3개 칩을 나란히
+   그린다. "여기가 동시에 돈다"는 걸 한 칸 안에 압축해서 보여주는 지점. */
+.stepper-chips {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.stepper-chip {
+  font-family: var(--mono);
+  font-size: 10px;
+  padding: 3px 7px;
+  border-radius: 999px;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  background: #fff;
+  transition:
+    color 0.3s ease,
+    border-color 0.3s ease,
+    background-color 0.3s ease;
+}
+.stepper-chip.status-active {
+  color: var(--stage-fg);
+  border-color: var(--stage-border);
+  background: var(--stage-bg);
+  font-weight: 500;
+}
+.stepper-chip.status-done {
+  color: var(--stage-fg);
+  border-color: var(--stage-border);
+  background: var(--stage-bg);
+  opacity: 0.7;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stepper-node.status-active .stepper-dot {
+    animation: none;
+  }
 }
 
 /* Results state: top-aligned document layout */

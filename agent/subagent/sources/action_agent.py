@@ -10,9 +10,23 @@ from google.adk.tools.mcp_tool.mcp_session_manager import (
 )
 from google.adk.tools.mcp_tool.mcp_toolset import McpToolset
 from google.auth.transport.requests import Request
+from google.genai import types
 from google.oauth2.id_token import fetch_id_token
 
 from .action_evidence_validation import collect_tool_votes
+
+# evidence_synthesis.py의 merge/guardrail에 thinking_budget=0을 적용해 93.8초
+# ->66.2초(약 30% 단축)를 실측한 선례가 있다(evidence_synthesis.py 주석
+# 참고, 정확도 회귀 없음 확인됨). action_agent는 도구 호출 결과를 정해진
+# JSON 스키마로 옮겨 담는 종류의 작업이라 merge/guardrail과 성격이 비슷해
+# 같은 최적화를 적용한다. 단, source_verification.py의 verifier 3개는
+# 반대로 thinking을 껐다가 각주-출처 정합 오류 재현율이 악화돼 되돌린
+# 전례가 있다(exit_loop 여부 판단처럼 "경계 판단"에는 thinking이 기여할 수
+# 있다는 뜻) — action_agent 자체는 verifier가 아니라 스키마 채우기
+# 작업이므로 같은 문제가 재현되는지 별도로 실측 확인이 필요하다.
+_no_thinking_config = types.GenerateContentConfig(
+    thinking_config=types.ThinkingConfig(thinking_budget=0),
+)
 
 
 MCP_URL = os.getenv("MCP_URL", "http://localhost:8080/mcp")
@@ -94,6 +108,7 @@ action_mcp_tools = McpToolset(
 action_agent = Agent(
     name="action_agent",
     model=os.getenv("MODEL", "gemini-3.5-flash"),
+    generate_content_config=_no_thinking_config,
     tools=[action_mcp_tools],
     before_agent_callback=_begin_action_attempt,
     before_model_callback=_reset_retry_model_history,

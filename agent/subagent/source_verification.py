@@ -58,6 +58,46 @@ MAX_VERIFICATION_ITERATIONS = 2
 _URL_PATTERN = re.compile(r"https?://[^\s\)\]\"'>]+")
 
 
+def _block_repeat_search_news(tool, args, tool_context):
+    """search_news가 한 실행(context_agent 한 턴) 안에서 두 번째 이상
+    호출되면 실제 API를 부르지 않고 즉시 안내 응답으로 대체한다.
+
+    context_agent.py의 instruction은 "호출은 딱 한 번만"이라고 명시하지만,
+    이 파일 자체의 버그 기록(다른 규칙 — 본인 발언 필터링 — 에 대해)에
+    이미 적어뒀듯 instruction만으로는 LLM이 100% 지키지 않는다. 실측으로
+    "관련 뉴스 48건 조회"(display=25 상한의 약 2배, 두 번 호출한 결과가
+    합쳐진 수)가 확인됐다 — display=25로 상한을 걸어도 그건 "한 번의
+    호출"에 대한 상한일 뿐, LLM이 도구를 몇 번 호출하는지는 별개 문제라는
+    뜻(LoopAgent의 max_iterations=1로 "몇 번 재검색하는지"는 이미 막았지만,
+    이건 한 실행 안에서 도구를 몇 번 부르는지를 막지는 못한다). 여기서
+    코드로 물리적 상한을 강제한다 — instruction 위반 여부와 무관하게 항상
+    지켜지게.
+
+    ADK의 before_tool_callback 처리는 반환값을 `if function_response:`로
+    truthy 체크한다(google/adk/flows/llm_flows/functions.py 실측 확인) —
+    빈 리스트([])는 falsy라 "오버라이드 없음"으로 취급돼 실제 도구 호출로
+    그대로 넘어가버린다(차단 실패). 그래서 빈 리스트 대신 원소 하나짜리
+    리스트를 반환한다 — url을 비워둬 _record_search_news_urls가 URL로
+    잘못 집계하지 않게 하고, description에 상한 안내를 담아 LLM이 왜
+    결과가 없는지 이해하게 한다(search_news의 실제 반환 형식과 필드를
+    그대로 맞춤 — web_search_tool.py 참고).
+    """
+    del args
+    if tool.name != "search_news":
+        return None
+    if tool_context.state.get("_context_search_news_called"):
+        return [
+            {
+                "title": "",
+                "description": "이미 검색을 1회 수행했다. 추가 검색 없이 이전 결과로 답하라.",
+                "url": None,
+                "published_at": None,
+            }
+        ]
+    tool_context.state["_context_search_news_called"] = True
+    return None
+
+
 def _record_search_news_urls(tool, args, tool_context, tool_response):
     """context_agent의 search_news 호출 결과 URL을 session state에 기록한다.
 
@@ -254,6 +294,13 @@ context_verifier = _make_verifier(
     "context_verifier", "context_info", "context_retry_hint", check_own_actions_only=True
 )
 
+# context_agent의 search_news 호출을 실제로 코드 레벨에서 1회로 제한한다
+# (instruction의 "딱 한 번만"이 LLM에서 항상 지켜지지는 않음 —
+# _block_repeat_search_news 주석 참고). before는 after보다 먼저 걸어야
+# 순서가 맞다(ADK는 리스트 순서대로 실행 — canonical_before_tool_callbacks
+# 참고), 정확히는 서로 다른 훅(before/after)이라 등록 순서 자체는 무관하지만
+# 읽는 사람이 실행 흐름(호출 차단 -> URL 기록) 순서로 읽히도록 먼저 둔다.
+context_agent.before_tool_callback = _block_repeat_search_news
 # context_agent가 search_news를 호출할 때마다 실제 반환 URL을 session state에 기록.
 context_agent.after_tool_callback = _record_search_news_urls
 
@@ -286,7 +333,21 @@ action_verified_loop = LoopAgent(
 
 context_verified_loop = LoopAgent(
     name="context_verified_loop",
-    description="context_agent 실행 후 근거를 검증하고, 불분명하면 재검색한다.",
-    max_iterations=MAX_VERIFICATION_ITERATIONS,
+    description="context_agent를 실행하고 근거를 검증한다. 뉴스는 재검색하지 않는다.",
+    # speech/action과 달리 max_iterations=1로 고정 — 뉴스는 검색을 한 번만
+    # 하게 해달라는 명시적 요청("뉴스는 반복루프 돌게 하지 마 한번만
+    # 검색하게 해"). context_agent의 instruction 자체도 이미 "search_news는
+    # 딱 한 번만 호출"이라 명시돼 있지만(위 착수 문구 주석의 "context_agent는
+    # 차수를 안 붙인다" 참고), context_verifier가 근거 불분명으로 판정하면
+    # LoopAgent가 max_iterations 안에서 context_agent를 다시 통째로
+    # 실행시켜 실질적으로 search_news가 두 번 불리는 경우가 있었다(실측:
+    # SSE 스트림에서 "관련 뉴스 25건 조회"가 두 번, 그 사이 "관련 뉴스
+    # 조회 중" 재착수가 낀 것으로 확인). max_iterations=1이면 1회차에서
+    # 검증에 실패해도 루프가 다음 iteration으로 넘어가지 않고 그대로
+    # 끝난다 — 검증 실패 시의 안전장치(_check_action_against_mcp 패턴처럼
+    # 미검증 정보를 걷어내는 것)는 없지만, context_verifier의
+    # before_agent_callback(URL 대조)이 여전히 LLM 판단 전에 가짜 URL을
+    # 걸러내므로 최소한의 안전망은 유지된다.
+    max_iterations=1,
     sub_agents=[context_agent, context_verifier],
 )
