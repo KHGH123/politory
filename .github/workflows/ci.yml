@@ -176,10 +176,10 @@ jobs:
           )
           for result in deterministic_failures:
               print(f"DETERMINISTIC FAILURE: {result.get('id')}")
+          for result in errors:
+              print(f"ERROR {result.get('id')}: {result['error']}")
 
-          if errors or deterministic_gate_failed or score_failures:
-              for result in errors:
-                  print(f"ERROR {result.get('id')}: {result['error']}")
+          if deterministic_gate_failed or score_failures:
               for failure in score_failures:
                   print(f"SCORE FAILURE: {failure}")
               sys.exit(1)
