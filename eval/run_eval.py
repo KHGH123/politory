@@ -55,7 +55,7 @@ from google import genai
 from google.genai import types as genai_types
 from pydantic import BaseModel, Field
 
-from backend.main import _run_agent
+from backend.main import _run_agent_with_diagnostics
 from config import settings
 
 _DATASET_PATH = Path(__file__).parent / "qa_dataset.jsonl"
@@ -81,6 +81,9 @@ class EvalRow(BaseModel):
     forbidden_phrases: list[str] = Field(default_factory=list)
     required_answer_phrases: list[str] = Field(default_factory=list)
     expected_legislator_id: str | None = None
+    required_agents: list[Literal["speech", "action", "context"]] = Field(
+        default_factory=list
+    )
 
 
 class GeminiJudge(DeepEvalBaseLLM):
@@ -191,7 +194,9 @@ def _sources_to_contexts(sources, member_name: str | None) -> list[str]:
     return contexts
 
 
-def _run_deterministic_checks(row: EvalRow, answer: str, sources) -> dict[str, dict]:
+def _run_deterministic_checks(
+    row: EvalRow, answer: str, sources, diagnostics: dict | None = None
+) -> dict[str, dict]:
     """LLM judge와 별개로 기계적으로 확정할 수 있는 품질 조건을 검사한다."""
 
     source_count = len(sources)
@@ -283,13 +288,28 @@ def _run_deterministic_checks(row: EvalRow, answer: str, sources) -> dict[str, d
             f"actual={sorted(primary_ids) or 'none'}, expected={row.expected_legislator_id}",
         )
 
+    if row.required_agents:
+        executed_agents = (diagnostics or {}).get("executed_agents", {})
+        missing_agents = [
+            agent_name
+            for agent_name in row.required_agents
+            if not executed_agents.get(agent_name, False)
+        ]
+        record(
+            "required_agents_executed",
+            not missing_agents,
+            "missing=" + (", ".join(missing_agents) if missing_agents else "none"),
+        )
+
     return checks
 
 
 async def _run_case(row: EvalRow, judge: GeminiJudge) -> dict:
     question = row.question
     started_at = time.perf_counter()
-    agent_response = await _run_agent(question, row.member_name, row.keyword)
+    agent_response, diagnostics = await _run_agent_with_diagnostics(
+        question, row.member_name, row.keyword
+    )
     contexts = _sources_to_contexts(agent_response.sources, row.member_name)
 
     test_case = LLMTestCase(
@@ -320,7 +340,7 @@ async def _run_case(row: EvalRow, judge: GeminiJudge) -> dict:
         scores[metric.__class__.__name__] = {"score": metric.score, "reason": metric.reason}
 
     deterministic_checks = _run_deterministic_checks(
-        row, agent_response.answer, agent_response.sources
+        row, agent_response.answer, agent_response.sources, diagnostics
     )
     deterministic_passed = all(check["passed"] for check in deterministic_checks.values())
 
@@ -331,6 +351,7 @@ async def _run_case(row: EvalRow, judge: GeminiJudge) -> dict:
         "question": question,
         "answer": agent_response.answer,
         "source_count": len(agent_response.sources),
+        "diagnostics": diagnostics,
         "scores": scores,
         "deterministic_checks": deterministic_checks,
         "deterministic_passed": deterministic_passed,

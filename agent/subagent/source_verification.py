@@ -73,6 +73,7 @@ def _record_search_news_urls(tool, args, tool_context, tool_response):
     del args
     if tool.name != "search_news":
         return None
+    tool_context.state["context_tool_called"] = True
     # search_news(agent/tools/web_search_tool.py)는 list[dict]를 직접 반환한다
     # (딕셔너리로 감싸지 않음). tool_response.get(...)으로 접근하려다
     # AttributeError('list' object has no attribute 'get')로 실제로 깨진 걸

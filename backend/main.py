@@ -312,7 +312,9 @@ _agent_runner = Runner(
 )
 
 
-async def _run_agent(question: str, member_name: str | None, keyword: str | None) -> AgentResponse:
+async def _run_agent_with_diagnostics(
+    question: str, member_name: str | None, keyword: str | None
+) -> tuple[AgentResponse, dict]:
     """root_agent를 한 번 실행해 evidence_synthesis의 최종 응답(AgentResponse)을 얻는다.
 
     query_processing이 자유 텍스트 하나만 받으므로, member_name/keyword를 질문
@@ -352,12 +354,27 @@ async def _run_agent(question: str, member_name: str | None, keyword: str | None
     session = await _session_service.get_session(
         app_name="politory_agent", user_id="backend", session_id=session_id
     )
-    final_state_answer = session.state.get("final_answer") if session else None
+    state = session.state if session else {}
+    final_state_answer = state.get("final_answer")
+    route = state.get("route", {}) or {}
+    if hasattr(route, "model_dump"):
+        route = route.model_dump()
+    diagnostics = {
+        "route": dict(route) if isinstance(route, dict) else {},
+        "executed_agents": {
+            "speech": bool(state.get("speech_tool_called", False)),
+            "action": bool(state.get("action_tool_called", False)),
+            "context": bool(state.get("context_tool_called", False)),
+        },
+    }
 
     if final_state_answer is None:
         # 파이프라인이 끝까지 돌았는데 guardrail 출력이 안 잡힌 비정상 케이스 —
         # 사용자에게는 원인불명 500 대신 "답변을 만들지 못했다"로 명확히 알린다.
-        return AgentResponse(answer="답변을 생성하지 못했습니다. 다시 시도해주세요.", sources=[])
+        return (
+            AgentResponse(answer="답변을 생성하지 못했습니다. 다시 시도해주세요.", sources=[]),
+            diagnostics,
+        )
 
     final_answer = (
         final_state_answer
@@ -370,6 +387,14 @@ async def _run_agent(question: str, member_name: str | None, keyword: str | None
     # 확인했다(예: 08-20, 08-11, 08-12, 08-20 순). LLM 출력 순서에 기대지 않고
     # 여기서 date 기준으로 확실하게 정렬한다.
     final_answer.sources = sorted(final_answer.sources, key=_source_sort_key)
+    return final_answer, diagnostics
+
+
+async def _run_agent(question: str, member_name: str | None, keyword: str | None) -> AgentResponse:
+    """API용 실행 경로. 진단 정보는 평가에서만 사용하고 응답에는 노출하지 않는다."""
+    final_answer, _diagnostics = await _run_agent_with_diagnostics(
+        question, member_name, keyword
+    )
     return final_answer
 
 

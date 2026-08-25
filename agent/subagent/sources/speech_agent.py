@@ -38,6 +38,7 @@ def _record_speech_evidence(tool, args, tool_context, tool_response):
     if not tool.name.endswith("retrieve_speech_evidence"):
         return None
 
+    tool_context.state["speech_tool_called"] = True
     sources = dict(tool_context.state.get("speech_source_utterances", {}))
     for utterance in collect_tool_utterances(tool_response):
         utterance_id = utterance.get("utterance_id")
