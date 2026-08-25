@@ -47,7 +47,10 @@ def _record_speech_evidence(tool, args, tool_context, tool_response):
         return None
 
     # 실제 검색에 사용한 ID를 보존해 verifier가 반환 발언의 ID와 대조한다.
-    tool_context.state["speech_requested_legislator_id"] = args.get("legislator_id")
+    confirmed_id = tool_context.state.get("requested_legislator_id")
+    tool_context.state["speech_requested_legislator_id"] = (
+        confirmed_id or args.get("legislator_id")
+    )
     sources = dict(tool_context.state.get("speech_source_utterances", {}))
     for utterance in collect_tool_utterances(tool_response):
         utterance_id = utterance.get("utterance_id")
@@ -85,7 +88,11 @@ speech_agent = Agent(
 
     ## 검색 절차
     1. 사용자 질문에서 국회의원 이름, 주제, 명시된 기간을 확인한다.
-    2. 의원 이름이 있으면 resolve_legislator를 먼저 호출한다. 결과가 없거나
+       백엔드에서 사용자가 선택한 의원 ID는 다음 값이다:
+       {requested_legislator_id?}
+       이 값이 비어 있지 않으면 동명이인 선택이 이미 끝난 것이므로 이름으로
+       다시 resolve하지 말고 이 ID를 그대로 사용한다.
+    2. 확정된 의원 ID가 없고 의원 이름만 있으면 resolve_legislator를 먼저 호출한다. 결과가 없거나
        동명이인이 여러 명이면 임의로 의원 ID를 선택하지 말고 한계에 명시한다.
     3. 확인된 legislator_id와 구체적인 주제어로 retrieve_speech_evidence를 호출한다.
        결과가 부족하면

@@ -69,12 +69,16 @@ def test_classify_returns_homonym_candidates(client, backend_module, monkeypatch
         lambda name: [
             backend_module.MemberCandidate(
                 name="박지원",
+                legislator_id="krna:H7X3372O",
                 party="더불어민주당",
+                district="전북 군산시김제시부안군을",
                 image_url="https://example.test/park-1.jpg",
             ),
             backend_module.MemberCandidate(
                 name="박지원",
+                legislator_id="krna:8BF5855P",
                 party="더불어민주당",
+                district="전남 해남군완도군진도군",
                 image_url="https://example.test/park-2.jpg",
             ),
         ],
@@ -92,6 +96,10 @@ def test_classify_returns_homonym_candidates(client, backend_module, monkeypatch
     assert body["keywords"] == []
     assert len(body["member_candidates"]) == 2
     assert {candidate["name"] for candidate in body["member_candidates"]} == {"박지원"}
+    assert {candidate["legislator_id"] for candidate in body["member_candidates"]} == {
+        "krna:H7X3372O",
+        "krna:8BF5855P",
+    }
 
 
 def test_classify_clears_suggestions_for_unknown_member(
@@ -121,7 +129,11 @@ def test_classify_clears_suggestions_for_unknown_member(
 
 def test_query_rejects_unknown_member(client, backend_module, monkeypatch):
     run_agent = AsyncMock()
-    monkeypatch.setattr(backend_module, "_get_member_profile", lambda name, party=None: None)
+    monkeypatch.setattr(
+        backend_module,
+        "_get_member_profile",
+        lambda name, party=None, legislator_id=None: None,
+    )
     monkeypatch.setattr(backend_module, "_run_agent", run_agent)
 
     response = client.post(
@@ -144,6 +156,7 @@ def test_query_returns_profile_answer_and_source(
 ):
     profile = backend_module.MemberProfile(
         name="박지원",
+        legislator_id="krna:H7X3372O",
         party="더불어민주당",
         district="전북 군산시김제시부안군을",
         term_count=1,
@@ -168,7 +181,7 @@ def test_query_returns_profile_answer_and_source(
     monkeypatch.setattr(
         backend_module,
         "_get_member_profile",
-        lambda name, party=None: profile,
+        lambda name, party=None, legislator_id=None: profile,
     )
     monkeypatch.setattr(backend_module, "_run_agent", run_agent)
 
@@ -177,6 +190,7 @@ def test_query_returns_profile_answer_and_source(
         json={
             "question": "전북 박지원 의원의 새만금 관련 발언을 알려줘",
             "member_name": "박지원",
+            "legislator_id": "krna:H7X3372O",
             "party": "더불어민주당",
             "keyword": "새만금",
         },
@@ -193,6 +207,7 @@ def test_query_returns_profile_answer_and_source(
         "전북 박지원 의원의 새만금 관련 발언을 알려줘",
         "박지원",
         "새만금",
+        "krna:H7X3372O",
     )
 
 

@@ -180,6 +180,16 @@ def _check_speech_against_mcp(callback_context: CallbackContext):
 
 def _check_action_against_mcp(callback_context: CallbackContext):
     """action_info의 표결 필드를 실제 MCP search_votes 결과와 대조한다."""
+    if callback_context.state.get("action_identity_mismatch"):
+        callback_context.state["action_info"] = '{"evidence": []}'
+        return types.Content(
+            parts=[
+                types.Part(
+                    text="사용자가 선택한 의원 ID와 다른 ID로 표결을 검색했다. "
+                    "requested_legislator_id를 그대로 legislator_id에 넣어 다시 검색하라."
+                )
+            ]
+        )
     if not callback_context.state.get("action_tool_called"):
         callback_context.state["action_info"] = '{"evidence": []}'
         return types.Content(

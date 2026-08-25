@@ -74,13 +74,14 @@ function RefineScreen({
                 {memberCandidates.map((c, i) => (
                   <button
                     type="button"
-                    key={i}
+                    key={c.legislator_id || i}
                     className={`keyword-card accent-${ACCENTS[i % ACCENTS.length]}`}
                     disabled={loading}
                     onClick={() => onCandidateSelect(c)}
                   >
                     <div className="keyword-title">{c.name}</div>
                     <div className="keyword-reason">{c.party || '정당 정보 없음'}</div>
+                    {c.district && <div className="keyword-reason">{c.district}</div>}
                   </button>
                 ))}
               </div>

@@ -49,6 +49,7 @@ _FIELD = {
 SCHEMA = [
     bigquery.SchemaField("id", "INTEGER", mode="REQUIRED"),
     bigquery.SchemaField("assembly_member_code", "STRING"),  # 열린국회정보 고유코드(자연키). bills/votes 조인용으로 추가.
+    bigquery.SchemaField("legislator_id", "STRING"),
     bigquery.SchemaField("name", "STRING", mode="REQUIRED"),
     bigquery.SchemaField("age", "INTEGER"),
     bigquery.SchemaField("party", "STRING"),
@@ -180,6 +181,7 @@ def transform(raw_rows: list[dict]) -> list[dict]:
             {
                 "id": i,
                 "assembly_member_code": code,
+                "legislator_id": f"krna:{code}" if code else None,
                 "name": _pick(raw, "name"),
                 "age": _parse_age(_pick(raw, "birth_date")),
                 "party": _last_segment(_pick(raw, "party")),

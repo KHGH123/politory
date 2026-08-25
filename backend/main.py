@@ -54,13 +54,16 @@ class MemberCandidate(BaseModel):
     """화면2 선택 카드용 — 동명이인 특정 또는 정책 기반 의원 추천, 두 경우 모두 재사용."""
 
     name: str
+    legislator_id: str | None = None
     party: str | None = None
+    district: str | None = None
     image_url: str | None = None
 
 
 class ClassifyResponse(BaseModel):
     sufficient: bool
     member_name: str | None = None
+    legislator_id: str | None = None
     keywords: list[KeywordSuggestion] = []
     member_candidates: list[MemberCandidate] = []
 
@@ -96,6 +99,7 @@ class MemberProfile(BaseModel):
     """MP(국회의원) BigQuery 테이블 조회 결과 — 화면3 상단 약력 카드용."""
 
     name: str
+    legislator_id: str | None = None
     age: int | None = None
     party: str | None = None
     gender: str | None = None
@@ -122,6 +126,7 @@ _MEMBERS_TABLE = f"{settings.BIGQUERY_PROJECT}.{settings.BIGQUERY_DATASET}.{sett
 def _row_to_profile(row: bigquery.table.Row) -> MemberProfile:
     return MemberProfile(
         name=row.name,
+        legislator_id=row.legislator_id,
         age=row.age,
         party=row.party,
         gender=row.gender,
@@ -143,13 +148,20 @@ def _find_members_by_name(name: str) -> list[MemberCandidate]:
     (예: 유명인은 맞히고 아니면 틀림) DB 조회로 확정한다.
     """
     job = _bq_client.query(
-        f"SELECT name, party, image_url FROM `{_MEMBERS_TABLE}` WHERE name = @name",
+        f"SELECT name, legislator_id, party, district, image_url "
+        f"FROM `{_MEMBERS_TABLE}` WHERE name = @name",
         job_config=bigquery.QueryJobConfig(
             query_parameters=[bigquery.ScalarQueryParameter("name", "STRING", name)]
         ),
     )
     return [
-        MemberCandidate(name=row.name, party=row.party, image_url=row.image_url)
+        MemberCandidate(
+            name=row.name,
+            legislator_id=row.legislator_id,
+            party=row.party,
+            district=row.district,
+            image_url=row.image_url,
+        )
         for row in job.result()
     ]
 
@@ -161,7 +173,7 @@ def _find_members_by_committee(committee_guess: str, limit: int = 3) -> list[Mem
     콤마로 붙어있을 수 있어 LIKE로 부분일치한다.
     """
     job = _bq_client.query(
-        f"SELECT name, party, image_url FROM `{_MEMBERS_TABLE}` "
+        f"SELECT name, legislator_id, party, district, image_url FROM `{_MEMBERS_TABLE}` "
         f"WHERE committee LIKE @pattern ORDER BY term_count DESC, name LIMIT @limit",
         job_config=bigquery.QueryJobConfig(
             query_parameters=[
@@ -171,19 +183,36 @@ def _find_members_by_committee(committee_guess: str, limit: int = 3) -> list[Mem
         ),
     )
     return [
-        MemberCandidate(name=row.name, party=row.party, image_url=row.image_url)
+        MemberCandidate(
+            name=row.name,
+            legislator_id=row.legislator_id,
+            party=row.party,
+            district=row.district,
+            image_url=row.image_url,
+        )
         for row in job.result()
     ]
 
 
-def _get_member_profile(name: str, party: str | None = None) -> MemberProfile | None:
+def _get_member_profile(
+    name: str,
+    party: str | None = None,
+    legislator_id: str | None = None,
+) -> MemberProfile | None:
     """약력 카드용 필드를 조회. 없으면 None.
 
     동명이인이 있을 수 있어 party가 주어지면 그것까지 같이 필터링해 특정한다.
     """
     query = f"SELECT * FROM `{_MEMBERS_TABLE}` WHERE name = @name"
     params = [bigquery.ScalarQueryParameter("name", "STRING", name)]
-    if party:
+    if legislator_id:
+        query += " AND legislator_id = @legislator_id"
+        params.append(
+            bigquery.ScalarQueryParameter(
+                "legislator_id", "STRING", legislator_id
+            )
+        )
+    elif party:
         query += " AND party = @party"
         params.append(bigquery.ScalarQueryParameter("party", "STRING", party))
     query += " LIMIT 1"
@@ -255,7 +284,19 @@ def classify(request: ClassifyRequest) -> ClassifyResponse:
             # 동명이인 — 어느 쪽인지 특정 안 되니 화면2에서 사용자가 직접 고르게 한다.
             result.sufficient = False
             result.member_name = None
+            result.legislator_id = None
             result.member_candidates = candidates
+        else:
+            result.legislator_id = candidates[0].legislator_id
+    elif llm_result.committee_guess:
+        # 인물 없이 정책만 있는 질문 — "검색축은 인물"이라는 원칙에 따라 정책 키워드
+        # 대신 그 정책을 다루는 상임위 소속 실제 의원을 추천 카드로 보여준다.
+        # committee_guess 자체는 DB에 없을 수도 있으니(오타/변형 표기), 매칭되는
+        # 의원이 없으면 원래 하던 대로 정책 키워드로 폴백한다.
+        committee_matches = _find_members_by_committee(llm_result.committee_guess)
+        if committee_matches:
+            result.member_candidates = committee_matches
+            result.keywords = []
 
     if not result.member_name and not result.member_candidates and llm_result.committee_guess:
         # 인물이 없거나(정책만 있는 질문) DB에 없는 인물이면, "검색축은 인물"이라는
@@ -289,6 +330,7 @@ def classify(request: ClassifyRequest) -> ClassifyResponse:
 class QueryRequest(BaseModel):
     question: str
     member_name: str | None = None
+    legislator_id: str | None = None
     party: str | None = None  # 동명이인 특정용. 화면2 후보 선택 시 프론트가 채워 보낸다.
     keyword: str | None = None
 
@@ -403,7 +445,12 @@ def _count_json_evidence(info_text: str | None) -> int | None:
     return len(evidence) if isinstance(evidence, list) else None
 
 
-async def _run_agent_stream(question: str, member_name: str | None, keyword: str | None):
+async def _run_agent_stream(
+    question: str,
+    member_name: str | None,
+    keyword: str | None,
+    legislator_id: str | None = None,
+):
     """root_agent를 한 번 실행하며 (진행 문구, 최종 AgentResponse|None)을 순서대로 yield한다.
 
     각 서브에이전트가 시작될 때 "OO 조회 중..." 착수 문구를, 그 소스 에이전트가
@@ -420,13 +467,18 @@ async def _run_agent_stream(question: str, member_name: str | None, keyword: str
     parts = [question]
     if member_name:
         parts.append(f"(대상 의원: {member_name})")
+    if legislator_id:
+        parts.append(f"(확정된 의원 ID: {legislator_id})")
     if keyword:
         parts.append(f"(키워드: {keyword})")
     combined_question = " ".join(parts)
 
     session_id = str(uuid.uuid4())
     await _session_service.create_session(
-        app_name="politory_agent", user_id="backend", session_id=session_id
+        app_name="politory_agent",
+        user_id="backend",
+        session_id=session_id,
+        state={"requested_legislator_id": legislator_id or ""},
     )
 
     # author(action_agent/speech_agent/context_agent)별 착수 횟수. 재검색
@@ -750,7 +802,12 @@ async def _run_agent_stream(question: str, member_name: str | None, keyword: str
     yield None, final_answer
 
 
-async def _run_agent(question: str, member_name: str | None, keyword: str | None) -> AgentResponse:
+async def _run_agent(
+    question: str,
+    member_name: str | None,
+    keyword: str | None,
+    legislator_id: str | None = None,
+) -> AgentResponse:
     """root_agent를 한 번 실행해 evidence_synthesis의 최종 응답(AgentResponse)을 얻는다.
 
     /api/query(비스트리밍)가 쓰는 얇은 래퍼 — 진행 이벤트는 버리고 마지막
@@ -758,7 +815,9 @@ async def _run_agent(question: str, member_name: str | None, keyword: str | None
     /api/query/stream(_run_agent_stream)을 쓴다.
     """
     final_answer: AgentResponse | None = None
-    async for _label, response in _run_agent_stream(question, member_name, keyword):
+    async for _label, response in _run_agent_stream(
+        question, member_name, keyword, legislator_id
+    ):
         if response is not None:
             final_answer = response
     assert final_answer is not None  # _run_agent_stream은 항상 마지막에 응답을 낸다
@@ -837,7 +896,9 @@ def _validate_query_request(request: QueryRequest) -> MemberProfile | None:
         raise HTTPException(status_code=400, detail="질문을 입력해주세요.")
 
     profile = (
-        _get_member_profile(request.member_name, request.party) if request.member_name else None
+        _get_member_profile(request.member_name, request.party, request.legislator_id)
+        if request.member_name
+        else None
     )
 
     # classify를 거치지 않고 화면2에서 자유 입력으로 바로 넘어온 경우까지 대비해,
@@ -852,7 +913,12 @@ def _validate_query_request(request: QueryRequest) -> MemberProfile | None:
 async def query(request: QueryRequest) -> QueryResponse:
     profile = _validate_query_request(request)
 
-    agent_response = await _run_agent(request.question, request.member_name, request.keyword)
+    agent_response = await _run_agent(
+        request.question,
+        request.member_name,
+        request.keyword,
+        request.legislator_id,
+    )
 
     return QueryResponse(
         answer=agent_response.answer, sources=agent_response.sources, member_profile=profile
@@ -884,7 +950,10 @@ async def query_stream(request: QueryRequest) -> EventSourceResponse:
     async def event_generator():
         try:
             async for label, response in _run_agent_stream(
-                request.question, request.member_name, request.keyword
+                request.question,
+                request.member_name,
+                request.keyword,
+                request.legislator_id,
             ):
                 if response is not None:
                     yield {
