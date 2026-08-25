@@ -19,6 +19,15 @@ from google.oauth2.id_token import fetch_id_token
 
 from .speech_evidence_validation import collect_tool_utterances
 
+# thinking_budget=0을 실측 시도했다가 되돌림: action_agent.py와 같은
+# 근거(evidence_synthesis.py의 merge/guardrail 30% 단축 선례)로 껐더니
+# speech_loop 자체는 9~13초대로 빨라졌지만(기존 15~16초), speech_verifier가
+# "speech_info를 지정된 JSON 객체 형식으로만 다시 출력하라"는 형식 오류로
+# 재시도하는 게 2회 실행 모두에서 재현됐다(1회차 1번, 2회차 2회 연속).
+# action_agent는 같은 변경으로 이 문제가 없었던 것과 대조적 — speech_agent의
+# 출력 스키마(nested evidence 배열)가 더 복잡해서 thinking 없이 형식을
+# 안정적으로 못 지키는 것으로 보인다. 속도보다 안정성을 우선해 되돌린다.
+
 
 MCP_URL = os.getenv("MCP_URL", "http://localhost:8080/mcp")
 MCP_AUDIENCE = os.getenv("MCP_AUDIENCE", "")
@@ -34,11 +43,15 @@ def _mcp_headers(_readonly_context) -> dict[str, str]:
 
 def _record_speech_evidence(tool, args, tool_context, tool_response):
     """실제 MCP 원문을 검증용 session state에 발언 ID별로 보존한다."""
-    del args
     if not tool.name.endswith("retrieve_speech_evidence"):
         return None
 
     tool_context.state["speech_tool_called"] = True
+    # 실제 검색에 사용한 ID를 보존해 verifier가 반환 발언의 ID와 대조한다.
+    confirmed_id = tool_context.state.get("requested_legislator_id")
+    tool_context.state["speech_requested_legislator_id"] = (
+        confirmed_id or args.get("legislator_id")
+    )
     sources = dict(tool_context.state.get("speech_source_utterances", {}))
     for utterance in collect_tool_utterances(tool_response):
         utterance_id = utterance.get("utterance_id")
@@ -76,7 +89,11 @@ speech_agent = Agent(
 
     ## 검색 절차
     1. 사용자 질문에서 국회의원 이름, 주제, 명시된 기간을 확인한다.
-    2. 의원 이름이 있으면 resolve_legislator를 먼저 호출한다. 결과가 없거나
+       백엔드에서 사용자가 선택한 의원 ID는 다음 값이다:
+       {requested_legislator_id?}
+       이 값이 비어 있지 않으면 동명이인 선택이 이미 끝난 것이므로 이름으로
+       다시 resolve하지 말고 이 ID를 그대로 사용한다.
+    2. 확정된 의원 ID가 없고 의원 이름만 있으면 resolve_legislator를 먼저 호출한다. 결과가 없거나
        동명이인이 여러 명이면 임의로 의원 ID를 선택하지 말고 한계에 명시한다.
     3. 확인된 legislator_id와 구체적인 주제어로 retrieve_speech_evidence를 호출한다.
        결과가 부족하면

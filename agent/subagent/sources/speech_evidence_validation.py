@@ -55,6 +55,7 @@ def collect_tool_utterances(tool_response: Any) -> list[dict[str, Any]]:
 def validate_speech_info(
     speech_info: Any,
     source_utterances: dict[str, dict[str, Any]],
+    requested_legislator_id: str | None,
 ) -> tuple[bool, str]:
     """모든 인용과 메타데이터가 실제 MCP 원문과 일치하는지 검사한다."""
     parsed = parse_speech_info(speech_info)
@@ -69,6 +70,12 @@ def validate_speech_info(
         return False, "evidence는 배열이어야 한다."
     if not evidence:
         return False, "검증 가능한 회의록 근거가 없다. 검색어를 바꿔 다시 검색하라."
+
+    if not isinstance(requested_legislator_id, str) or not requested_legislator_id.strip():
+        return False, (
+            "resolve_legislator로 확인된 의원 ID 없이 발언을 검색했다. "
+            "의원을 확인할 수 없으면 근거를 채택하지 마라."
+        )
 
     seen: set[str] = set()
     for index, item in enumerate(evidence, start=1):
@@ -96,6 +103,11 @@ def validate_speech_info(
                 "국회의원 발언인지 확인되지 않는다. 국회의원이 아닌 진술인·정부"
                 " 관계자 발언일 수 있으니 제외하고, legislator_id가 채워진"
                 " 결과만 다시 채택하라."
+            )
+        if legislator_id != requested_legislator_id:
+            return False, (
+                f"근거 {index}의 legislator_id({legislator_id})가 조회 대상 의원 "
+                f"ID({requested_legislator_id})와 다르다. 해당 근거를 제외하라."
             )
 
         quote = item.get("quote")

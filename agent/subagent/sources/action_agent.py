@@ -10,9 +10,23 @@ from google.adk.tools.mcp_tool.mcp_session_manager import (
 )
 from google.adk.tools.mcp_tool.mcp_toolset import McpToolset
 from google.auth.transport.requests import Request
+from google.genai import types
 from google.oauth2.id_token import fetch_id_token
 
 from .action_evidence_validation import collect_tool_votes
+
+# evidence_synthesis.py의 merge/guardrail에 thinking_budget=0을 적용해 93.8초
+# ->66.2초(약 30% 단축)를 실측한 선례가 있다(evidence_synthesis.py 주석
+# 참고, 정확도 회귀 없음 확인됨). action_agent는 도구 호출 결과를 정해진
+# JSON 스키마로 옮겨 담는 종류의 작업이라 merge/guardrail과 성격이 비슷해
+# 같은 최적화를 적용한다. 단, source_verification.py의 verifier 3개는
+# 반대로 thinking을 껐다가 각주-출처 정합 오류 재현율이 악화돼 되돌린
+# 전례가 있다(exit_loop 여부 판단처럼 "경계 판단"에는 thinking이 기여할 수
+# 있다는 뜻) — action_agent 자체는 verifier가 아니라 스키마 채우기
+# 작업이므로 같은 문제가 재현되는지 별도로 실측 확인이 필요하다.
+_no_thinking_config = types.GenerateContentConfig(
+    thinking_config=types.ThinkingConfig(thinking_budget=0),
+)
 
 
 MCP_URL = os.getenv("MCP_URL", "http://localhost:8080/mcp")
@@ -33,6 +47,7 @@ def _begin_action_attempt(callback_context: CallbackContext):
     callback_context.state["action_attempt"] = attempt
     callback_context.state["action_source_votes"] = {}
     callback_context.state["action_tool_called"] = False
+    callback_context.state["action_identity_mismatch"] = False
     callback_context.state["action_retry_context_pending"] = bool(
         attempt > 1 and callback_context.state.get("action_retry_hint")
     )
@@ -67,8 +82,13 @@ def _reset_retry_model_history(
 
 def _record_action_evidence(tool, args, tool_context, tool_response):
     """실제 MCP 표결 문서를 검증용 session state에 문서 ID별로 보존한다."""
-    del args
     if not tool.name.endswith("search_votes"):
+        return None
+
+    confirmed_id = tool_context.state.get("requested_legislator_id")
+    if confirmed_id and args.get("legislator_id") != confirmed_id:
+        tool_context.state["action_identity_mismatch"] = True
+        tool_context.state["action_tool_called"] = True
         return None
 
     sources = dict(tool_context.state.get("action_source_votes", {}))
@@ -94,6 +114,7 @@ action_mcp_tools = McpToolset(
 action_agent = Agent(
     name="action_agent",
     model=os.getenv("MODEL", "gemini-3.5-flash"),
+    generate_content_config=_no_thinking_config,
     tools=[action_mcp_tools],
     before_agent_callback=_begin_action_attempt,
     before_model_callback=_reset_retry_model_history,
@@ -112,8 +133,11 @@ action_agent = Agent(
     반복 출력해서는 안 된다.
 
     ## 검색 절차
-    1. 질문에서 의원명, 안건·정책 주제, 표결 선택을 파악한다.
+    1. 질문에서 의원명, 안건·정책 주제, 표결 선택을 파악한다. 백엔드에서
+       사용자가 선택한 의원 ID는 다음 값이다:
+       {requested_legislator_id?}
     2. 특정 의원의 표결을 물으면 member_name을 반드시 지정한다.
+       위 의원 ID가 비어 있지 않으면 legislator_id에도 반드시 그대로 지정한다.
        찬성·반대·기권을 명시하면 YES·NO·ABSTAIN을 choice로 지정한다.
     3. 특정 의원 없이 안건의 전체 표결 결과를 물으면 member_name과
        choice를 비워 안건 요약 문서를 검색한다.

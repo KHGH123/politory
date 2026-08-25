@@ -308,7 +308,7 @@ async def _run_case(row: EvalRow, judge: GeminiJudge) -> dict:
     question = row.question
     started_at = time.perf_counter()
     agent_response, diagnostics = await _run_agent_with_diagnostics(
-        question, row.member_name, row.keyword
+        question, row.member_name, row.keyword, row.expected_legislator_id
     )
     contexts = _sources_to_contexts(agent_response.sources, row.member_name)
 
