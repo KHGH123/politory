@@ -281,10 +281,22 @@ def _verify_excerpts(callback_context: CallbackContext) -> None:
 # sources 배열 순서와 다르게 뒤섞이거나, 심하면 완전히 다른 근거를 가리킴).
 # 그래서 "번호 계산" 자체를 LLM에서 걷어낸다: merge/guardrail은 각 source에
 # 안정적인 라벨(ref_id, "s1"/"s2"...)만 붙이고 answer에서는 "⟦s1⟧"처럼 그
-# 라벨만 인용한다. 최종 번호는 여기서 sources 배열의 실제 순서를 세어
-# 결정적으로 계산해 "⟦s1⟧" -> "[1]"로 치환한다 — LLM이 셈을 틀릴 여지가
-# 구조적으로 없다. 동시에 sources 배열에서 ref_id 필드는 내부 처리용이라
-# 최종 응답(API 스키마)에는 노출하지 않고 제거한다.
+# 라벨만 인용한다.
+#
+# 이 라벨 -> 최종 "[1]" 번호 치환과 sources 정렬은 *여기서 하지 않는다*.
+# 처음엔 여기서 "answer 첫 등장 순서"로 sources를 재정렬하고 번호까지
+# 확정했었는데, 그 직후 backend/main.py가 F-02(시간순 나열) 요구를 만족시키려고
+# sources를 다시 date 기준으로 재정렬하는 별도 로직(_source_sort_key)을 갖고
+# 있다는 게 드러났다 — 정렬 기준이 두 곳(언급 순서 vs 날짜순)에 따로 존재해서,
+# 이 단계가 맞춰놓은 "answer의 [1][2][3] = sources 배열 순서"를 backend가
+# *텍스트는 그대로 둔 채 배열만 재정렬*하며 다시 깨뜨렸다(로컬 검증만으론
+# 못 잡힘 — adk web은 backend/main.py를 안 거치므로 이 재정렬 자체가 없다).
+# 정렬 로직을 두 군데 유지하면 한쪽만 고쳐질 때마다 다시 어긋나므로,
+# "sources를 어떤 순서로 배치할지"와 "그 순서를 보고 번호를 매기는 것"을
+# 하나의 단계(backend/main.py, _source_sort_key + 아래 _REF_MARKER_PATTERN
+# 재사용)로 합쳤다. 이 단계는 ref_id를 지우지 않고 그대로 최종 응답에 넘긴다
+# (Source.ref_id는 기본값 ""가 있어 검증 에러 없이 통과하며, backend가 번호
+# 계산에 쓴 뒤 최종적으로 제거한다).
 #
 # 마커에 "{}"가 아니라 "⟦⟧"(U+27E6/E7)를 쓰는 이유: 처음엔 "{s1}"을 썼는데,
 # ADK의 instruction 템플릿 엔진이 "{변수명}"을 무조건 session state 치환
@@ -298,44 +310,26 @@ _REF_MARKER_PATTERN = re.compile(r"⟦(s\d+)⟧")
 
 
 def _resolve_footnotes(callback_context: CallbackContext) -> None:
+    """guardrail이 제거한 sources를 가리키던 죽은 마커(⟦sN⟧)만 청소한다.
+
+    번호 계산과 sources 정렬은 backend/main.py로 옮겼다(위 주석 참고) —
+    이 함수는 "## 1. 근거 없는 출처 제거"로 sources 항목이 사라졌는데 answer에
+    그 항목을 인용하던 라벨만 남는 경우(guardrail이 문장 전체를 못 지웠을 때의
+    이중 방어선)를 정리하는 역할만 한다.
+    """
     raw = callback_context.state.get("final_answer")
     if not raw:
         return None
 
     response = raw if isinstance(raw, AgentResponse) else AgentResponse.model_validate(raw)
 
-    # TEMP DEBUG(각주-출처 불일치 조사용, 문제 해결되면 제거): 배포 환경에서만
-    # 재현되고 로컬에서는 재현이 안 돼 merge/guardrail이 실제로 무엇을 냈는지
-    # 확인할 방법이 없었다 — Cloud Run stdout은 자동으로 로그에 잡히므로
-    # print로 남긴다. 응답 텍스트(공개 뉴스 발췌 수준)를 로그에 남기므로
-    # 진단이 끝나면 제거할 것.
-    ref_ids = [s.ref_id for s in response.sources]
-    markers_in_answer = _REF_MARKER_PATTERN.findall(response.answer)
-    logger.warning(
-        "footnote_debug ref_ids=%r markers_in_answer=%r duplicate_ref_ids=%r",
-        ref_ids,
-        markers_in_answer,
-        len(ref_ids) != len(set(ref_ids)),
-    )
-
-    # ref_id -> 1-based 인덱스. 중복 ref_id는 먼저 나온 것을 기준으로 삼는다
-    # (merge/guardrail이 실수로 같은 라벨을 두 번 썼더라도 결과가 결정적이게).
-    index_by_ref: dict[str, int] = {}
-    for i, source in enumerate(response.sources, start=1):
-        index_by_ref.setdefault(source.ref_id, i)
-
-    # "⟦s1⟧⟦s2⟧"처럼 라벨이 연달아 나와도 정규식이 하나씩 매칭하므로 각
-    # "⟦sN⟧"을 독립적으로 치환한다 — 없는 라벨(guardrail이 제거한 sources를
-    # 가리키던 것 등)은 빈 문자열로 지워 각주 없는 문장으로 남긴다.
+    live_ref_ids = {s.ref_id for s in response.sources if s.ref_id}
     response.answer = _REF_MARKER_PATTERN.sub(
-        lambda m: (f"[{index_by_ref[m.group(1)]}]" if m.group(1) in index_by_ref else ""),
+        lambda m: (m.group(0) if m.group(1) in live_ref_ids else ""),
         response.answer,
     )
 
-    for source in response.sources:
-        source.ref_id = ""  # 내부 처리용 필드 — 응답 직렬화 시 노출 안 함
-
-    callback_context.state["final_answer"] = response.model_dump(exclude={"sources": {"__all__": {"ref_id"}}})
+    callback_context.state["final_answer"] = response.model_dump()
     return None
 
 

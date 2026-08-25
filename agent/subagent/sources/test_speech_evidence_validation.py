@@ -36,32 +36,32 @@ class SpeechEvidenceValidationTest(unittest.TestCase):
 
     def test_accepts_exact_source_quote_and_metadata(self):
         result = validation.validate_speech_info(
-            json.dumps(self.speech_info, ensure_ascii=False), self.source
+            json.dumps(self.speech_info, ensure_ascii=False), self.source, "l1"
         )
         self.assertEqual(result, (True, ""))
 
     def test_rejects_quote_not_present_in_source(self):
         self.speech_info["evidence"][0]["quote"] = "원문에 없는 주장입니다."
         valid, reason = validation.validate_speech_info(
-            json.dumps(self.speech_info, ensure_ascii=False), self.source
+            json.dumps(self.speech_info, ensure_ascii=False), self.source, "l1"
         )
         self.assertFalse(valid)
         self.assertIn("원문에 없다", reason)
 
     def test_rejects_changed_metadata(self):
         self.speech_info["evidence"][0]["meeting_date"] = "2026-01-02"
-        valid, reason = validation.validate_speech_info(self.speech_info, self.source)
+        valid, reason = validation.validate_speech_info(self.speech_info, self.source, "l1")
         self.assertFalse(valid)
         self.assertIn("meeting_date", reason)
 
     def test_rejects_interpretation_outside_evidence_array(self):
         self.speech_info["interpretation"] = "이 의원은 입장을 바꿨다."
-        valid, reason = validation.validate_speech_info(self.speech_info, self.source)
+        valid, reason = validation.validate_speech_info(self.speech_info, self.source, "l1")
         self.assertFalse(valid)
         self.assertIn("해석", reason)
 
     def test_rejects_empty_evidence_to_trigger_retry(self):
-        valid, reason = validation.validate_speech_info({"evidence": []}, self.source)
+        valid, reason = validation.validate_speech_info({"evidence": []}, self.source, "l1")
         self.assertFalse(valid)
         self.assertIn("다시 검색", reason)
 
@@ -73,7 +73,7 @@ class SpeechEvidenceValidationTest(unittest.TestCase):
         self.source["u1"]["legislator_id"] = None
         self.speech_info["evidence"][0]["legislator_id"] = None
         valid, reason = validation.validate_speech_info(
-            json.dumps(self.speech_info, ensure_ascii=False), self.source
+            json.dumps(self.speech_info, ensure_ascii=False), self.source, "l1"
         )
         self.assertFalse(valid)
         self.assertIn("legislator_id", reason)
@@ -82,10 +82,24 @@ class SpeechEvidenceValidationTest(unittest.TestCase):
         self.source["u1"]["legislator_id"] = "   "
         self.speech_info["evidence"][0]["legislator_id"] = "   "
         valid, reason = validation.validate_speech_info(
-            json.dumps(self.speech_info, ensure_ascii=False), self.source
+            json.dumps(self.speech_info, ensure_ascii=False), self.source, "l1"
         )
         self.assertFalse(valid)
         self.assertIn("legislator_id", reason)
+
+    def test_rejects_search_without_resolved_legislator_id(self):
+        valid, reason = validation.validate_speech_info(
+            self.speech_info, self.source, None
+        )
+        self.assertFalse(valid)
+        self.assertIn("의원 ID 없이", reason)
+
+    def test_rejects_different_legislator_id(self):
+        valid, reason = validation.validate_speech_info(
+            self.speech_info, self.source, "different-id"
+        )
+        self.assertFalse(valid)
+        self.assertIn("조회 대상 의원", reason)
 
 
 if __name__ == "__main__":
