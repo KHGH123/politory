@@ -112,7 +112,13 @@ function RefineScreen({
             </>
           )}
 
-          {memberName && memberCandidates.length === 0 && keywordSuggestions.length === 0 && (
+          {/* 후보 카드를 고르면(handleCandidateSelect, App.jsx) 키워드가 없는
+              경우 즉시 runQuery를 쏴서 loading이 true가 되는데, 그 순간에도
+              memberName은 채워져 있고 memberCandidates는 막 비워진 상태라
+              이 버튼의 조건에 그대로 걸려버렸다 — 이미 자동으로 조회가
+              시작됐는데 진행 상황 스테퍼 옆에 쓸모없는 버튼이 수십 초간
+              남아있던 버그. loading 중엔 아예 렌더하지 않는다. */}
+          {!loading && memberName && memberCandidates.length === 0 && keywordSuggestions.length === 0 && (
             <button type="submit" className="search-button" disabled={loading}>
               조회하기
             </button>
