@@ -21,6 +21,7 @@ function App() {
   // 자유 편집 가능한 표시값이라 이름이 아닌 정책 텍스트가 섞일 수 있음 — /api/query는
   // member_name이 DB에 없으면 404를 내므로 미확정 텍스트를 member_name으로 보내면 안 됨)
   const [confirmedMemberName, setConfirmedMemberName] = useState('')
+  const [confirmedLegislatorId, setConfirmedLegislatorId] = useState('')
   const [confirmedParty, setConfirmedParty] = useState('')
   // 동명이인 후보 목록 (classify가 이름만으로 특정 못 했을 때)
   const [memberCandidates, setMemberCandidates] = useState([])
@@ -60,7 +61,7 @@ function App() {
       const keywords = data.keywords || []
 
       if (data.sufficient) {
-        await runQuery(text, data.member_name, null, '')
+        await runQuery(text, data.member_name, data.legislator_id || null, null, '')
       } else if (!data.member_name && candidates.length === 0 && keywords.length === 0) {
         // 등록된 국회의원으로도, 관련 상임위 인물로도 전혀 특정하지 못한 경우
         // (예: 정치인이 아닌 이름) — 화면2로 보내봤자 고를 것도 채울 것도
@@ -75,6 +76,7 @@ function App() {
         // 인물 특정 자체는 confirmedMemberName(아래)이 별도로 들고 있어 영향 없음.
         setMemberName(text)
         setConfirmedMemberName(data.member_name || '')
+        setConfirmedLegislatorId(data.legislator_id || '')
         setConfirmedParty('')
         setMemberCandidates(candidates)
         setKeywordSuggestions(keywords)
@@ -96,7 +98,13 @@ function App() {
 
   // effectiveQuestion: 화면2에서 "특정인/정책" 칸을 수정했으면 그 값이 실제 검색어가 되어야 함
   // (원래 화면1 질문을 그대로 쓰면 화면2에서 고친 내용이 무시되는 버그가 있었음)
-  async function runQuery(effectiveQuestion, memberNameValue, partyValue, keywordValue) {
+  async function runQuery(
+    effectiveQuestion,
+    memberNameValue,
+    legislatorIdValue,
+    partyValue,
+    keywordValue,
+  ) {
     setQuestion(effectiveQuestion)
     if (memberNameValue) setMemberName(memberNameValue)
     setLoading(true)
@@ -110,6 +118,7 @@ function App() {
         body: JSON.stringify({
           question: effectiveQuestion,
           member_name: memberNameValue || null,
+          legislator_id: legislatorIdValue || null,
           party: partyValue || null,
           keyword: keywordValue || null,
         }),
@@ -135,11 +144,18 @@ function App() {
   function handleCandidateSelect(candidate) {
     setMemberName(candidate.name)
     setConfirmedMemberName(candidate.name)
+    setConfirmedLegislatorId(candidate.legislator_id || '')
     setConfirmedParty(candidate.party || '')
     setMemberCandidates([])
 
     if (keywordSuggestions.length === 0) {
-      runQuery(question, candidate.name, candidate.party || null, question)
+      runQuery(
+        question,
+        candidate.name,
+        candidate.legislator_id || null,
+        candidate.party || null,
+        question,
+      )
     }
   }
 
@@ -149,6 +165,7 @@ function App() {
     setQuestion('')
     setMemberName('')
     setConfirmedMemberName('')
+    setConfirmedLegislatorId('')
     setConfirmedParty('')
     setMemberCandidates([])
     setKeywordSuggestions([])
@@ -167,6 +184,7 @@ function App() {
       setQuestion('')
       setMemberName('')
       setConfirmedMemberName('')
+      setConfirmedLegislatorId('')
       setConfirmedParty('')
     }
   }
@@ -202,7 +220,13 @@ function App() {
           // 완전히 다른 사람으로 바꾼 경우(confirmedMemberName이 더 이상 포함
           // 안 됨)에만 classifyAndRoute로 처음부터 다시 판단한다.
           if (confirmedMemberName && memberName.includes(confirmedMemberName)) {
-            runQuery(memberName, confirmedMemberName, confirmedParty || null, memberName)
+            runQuery(
+              memberName,
+              confirmedMemberName,
+              confirmedLegislatorId || null,
+              confirmedParty || null,
+              memberName,
+            )
           } else {
             classifyAndRoute(memberName)
           }
@@ -213,7 +237,13 @@ function App() {
           // 버그가 있었다. 원본은 question state에 그대로 남아있으므로(화면2
           // 진입 시 memberName/confirmedMemberName 등만 갱신되고 question은
           // 안 건드림) 그걸 그대로 쓴다 — handleCandidateSelect와 동일한 패턴.
-          runQuery(question, confirmedMemberName || null, confirmedParty || null, kw)
+          runQuery(
+            question,
+            confirmedMemberName || null,
+            confirmedLegislatorId || null,
+            confirmedParty || null,
+            kw,
+          )
         }
         onReset={handleBackToLanding}
         loading={loading}

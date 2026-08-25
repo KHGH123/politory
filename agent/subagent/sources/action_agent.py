@@ -33,6 +33,7 @@ def _begin_action_attempt(callback_context: CallbackContext):
     callback_context.state["action_attempt"] = attempt
     callback_context.state["action_source_votes"] = {}
     callback_context.state["action_tool_called"] = False
+    callback_context.state["action_identity_mismatch"] = False
     callback_context.state["action_retry_context_pending"] = bool(
         attempt > 1 and callback_context.state.get("action_retry_hint")
     )
@@ -67,8 +68,13 @@ def _reset_retry_model_history(
 
 def _record_action_evidence(tool, args, tool_context, tool_response):
     """실제 MCP 표결 문서를 검증용 session state에 문서 ID별로 보존한다."""
-    del args
     if not tool.name.endswith("search_votes"):
+        return None
+
+    confirmed_id = tool_context.state.get("requested_legislator_id")
+    if confirmed_id and args.get("legislator_id") != confirmed_id:
+        tool_context.state["action_identity_mismatch"] = True
+        tool_context.state["action_tool_called"] = True
         return None
 
     sources = dict(tool_context.state.get("action_source_votes", {}))
@@ -112,8 +118,11 @@ action_agent = Agent(
     반복 출력해서는 안 된다.
 
     ## 검색 절차
-    1. 질문에서 의원명, 안건·정책 주제, 표결 선택을 파악한다.
+    1. 질문에서 의원명, 안건·정책 주제, 표결 선택을 파악한다. 백엔드에서
+       사용자가 선택한 의원 ID는 다음 값이다:
+       {requested_legislator_id?}
     2. 특정 의원의 표결을 물으면 member_name을 반드시 지정한다.
+       위 의원 ID가 비어 있지 않으면 legislator_id에도 반드시 그대로 지정한다.
        찬성·반대·기권을 명시하면 YES·NO·ABSTAIN을 choice로 지정한다.
     3. 특정 의원 없이 안건의 전체 표결 결과를 물으면 member_name과
        choice를 비워 안건 요약 문서를 검색한다.
