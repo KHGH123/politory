@@ -3,7 +3,7 @@ function LandingScreen({ question, onQuestionChange, onSubmit, loading, error })
     <div className="page is-landing">
       <div className="landing-hero">
         <div className="landing-logo">
-          의정기록<span>.</span>
+          Politory<span>.</span>
         </div>
       </div>
 

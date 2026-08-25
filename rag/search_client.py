@@ -1,9 +1,72 @@
-"""Vertex AI Search(AI Applications) 데이터스토어/앱 접근점.
+from itertools import islice
+from google.cloud import discoveryengine_v1 as discoveryengine
 
-콘솔에서 데이터스토어+앱을 만들고 발언 텍스트(구조화 메타데이터 포함)를
-Cloud Storage에 업로드해서 ingest한 뒤, 앱 ID를 .env의 SEARCH_APP_ID로 넣는다.
-"""
+from rag.config import (
+    ACTION_SEARCH_ENGINE_ID,
+    SEARCH_PROJECT_ID,
+    SEARCH_ENGINE_ID,
+    SEARCH_LOCATION,
+)
 
 
-def get_search_app_id() -> str:
-    raise NotImplementedError
+client = discoveryengine.SearchServiceClient()
+
+
+def _search(
+    *,
+    query: str,
+    project_id: str,
+    location: str,
+    engine_id: str,
+    page_size: int,
+    filter_: str | None,
+) -> list[dict]:
+    serving_config = (
+        f"projects/{project_id}"
+        f"/locations/{location}"
+        f"/collections/default_collection"
+        f"/engines/{engine_id}"
+        f"/servingConfigs/default_config"
+    )
+    request = discoveryengine.SearchRequest(
+        serving_config=serving_config,
+        query=query,
+        page_size=page_size,
+        filter=filter_ or "",
+    )
+    response = client.search(request=request, timeout=15)
+    return [
+        {"id": result.document.id, "data": dict(result.document.struct_data)}
+        for result in islice(response, page_size)
+    ]
+
+
+def search_speeches(
+    query: str,
+    page_size: int = 10,
+    filter_: str | None = None,
+) -> list[dict]:
+    return _search(
+        query=query,
+        project_id=SEARCH_PROJECT_ID,
+        location=SEARCH_LOCATION,
+        engine_id=SEARCH_ENGINE_ID,
+        page_size=page_size,
+        filter_=filter_,
+    )
+
+
+def search_votes(
+    query: str,
+    page_size: int = 10,
+    filter_: str | None = None,
+) -> list[dict]:
+    """Vertex AI Search의 표결 전용 검색 앱을 조회한다."""
+    return _search(
+        query=query,
+        project_id=SEARCH_PROJECT_ID,
+        location=SEARCH_LOCATION,
+        engine_id=ACTION_SEARCH_ENGINE_ID,
+        page_size=page_size,
+        filter_=filter_,
+    )

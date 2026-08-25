@@ -23,7 +23,7 @@ function RefineScreen({
       <div className="refine-card">
         <div className="refine-hero">
           <div className="landing-logo small">
-            의정기록<span>.</span>
+            Politory<span>.</span>
           </div>
         </div>
 
@@ -44,7 +44,11 @@ function RefineScreen({
 
           {memberCandidates && memberCandidates.length > 0 && (
             <>
-              <label className="field-label">동명이인 — 찾으시는 분을 선택하세요</label>
+              <label className="field-label">
+                {keywordSuggestions.length > 0
+                  ? '동명이인 — 찾으시는 분을 선택하세요'
+                  : '관련 의원 — 조회할 분을 선택하세요'}
+              </label>
               <div className="keyword-grid">
                 {memberCandidates.map((c, i) => (
                   <button
@@ -62,7 +66,11 @@ function RefineScreen({
             </>
           )}
 
-          {keywordSuggestions.length > 0 && (
+          {/* 동명이인 후보가 남아있는 동안은 키워드부터 고를 수 없게 숨긴다 —
+              인물이 특정 안 된 채로 키워드를 누르면 member_name 없이 조회가
+              나가 화면3 약력 카드가 비는 버그로 이어진다(먼저 위 후보 카드로
+              인물을 확정해야 이 블록이 뜬다). */}
+          {(!memberCandidates || memberCandidates.length === 0) && keywordSuggestions.length > 0 && (
             <>
               <label className="field-label">키워드 선택</label>
               <div className="keyword-grid">

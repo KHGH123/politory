@@ -39,14 +39,18 @@ class Settings(BaseSettings):
     # 저장소
     SQLITE_PATH: str = "./db/uijeonggirok.sqlite3"
 
-    # BigQuery (국회의원 정형 데이터 — 다른 팀원이 적재)
+    # BigQuery (국회의원/법안/발언 데이터)
     # assembly 데이터셋이 실제로 있는 GCP 프로젝트가 GOOGLE_CLOUD_PROJECT(Vertex AI/Gemini용,
     # proj-aj11-...)와 다르다(proj-aj04-...) — 팀원마다 GCP 프로젝트가 갈린 상태.
     # BIGQUERY_PROJECT를 비워두면 GOOGLE_CLOUD_PROJECT로 폴백하고, 채워두면 BigQuery
     # 쿼리에서만 이 값을 쓴다(Vertex AI/Gemini 쪽 프로젝트는 그대로 유지).
     BIGQUERY_PROJECT: str = ""
     BIGQUERY_DATASET: str = ""
-    BIGQUERY_MEMBERS_TABLE: str = "MP"
+    # 실제 BigQuery 테이블명은 "mps"(소문자, 복수형)다 — "MP"로 두면 404
+    # NotFound(대소문자 구분)가 나는 걸 실측으로 확인해 기본값을 고쳤다.
+    BIGQUERY_MEMBERS_TABLE: str = "mps"
+    BIGQUERY_BILLS_TABLE: str = ""
+    BIGQUERY_SPEECHES_TABLE: str = ""
 
     # Vertex AI Search (RAG)
     SEARCH_APP_ID: str = ""

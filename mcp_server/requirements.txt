@@ -1,1 +1,4 @@
-fastmcp
+fastmcp==3.4.7
+google-cloud-bigquery==3.43.0
+google-cloud-discoveryengine==0.20.2
+python-dotenv>=1.1.0,<2.0.0

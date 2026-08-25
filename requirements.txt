@@ -13,11 +13,13 @@ uvicorn[standard]
 google-adk[a2a]==2.7.1
 # a2a-sdk의 JSON-RPC 라우트가 lifespan 시점에 임포트하는데 [a2a] extra에 빠져 있어 별도 명시
 sse-starlette
+# ADK 2.7.1의 McpToolset이 McpHttpClientFactory를 요구한다.
+# 낮은 MCP SDK가 이미지에 들어가면 Cloud Run이 import 단계에서 종료되므로 고정한다.
+mcp==1.29.0
 
-# --- 정형 데이터 (db/) ---
+# --- 정형 데이터 (db/, pipeline/) ---
 # sqlite3는 파이썬 표준 라이브러리 포함, 별도 설치 불필요
-# 국회의원 명단은 BigQuery(다른 팀원이 적재)에서 조회
-google-cloud-bigquery==3.27.0
+google-cloud-bigquery==3.43.0
 
 # --- 벡터DB / 검색 (rag/) ---
 # RAG는 로컬 Chroma 대신 Vertex AI Search(데이터스토어 + VertexAiSearchTool)로 결정.
@@ -31,6 +33,19 @@ pdfplumber==0.11.4
 ragas==0.2.6
 # deepeval 2.0.x~2.1.x는 Python 3.13 미지원이라 버전 고정 안 함 (pip가 알아서 호환 버전 선택)
 deepeval
+# ragas 0.2.6/deepeval 둘 다 langchain 상한을 안 박아놔서, langchain을 그냥
+# 설치하면 pip이 최근 나온 LangChain v1(구 API를 대거 제거한 major 리라이트)을
+# 깔아버린다 — 그러면 ragas는 `langchain_community.chat_models.vertexai`가
+# 없어서, deepeval은 `langchain.schema`가 없어서 import 자체가 실패한다
+# (실측 확인). 두 라이브러리가 실제로 나온 시점 기준의 0.3.x 세대로 고정.
+langchain<1.0
+langchain-core<1.0
+langchain-community<1.0
+langchain-openai<1.0
+# deepeval의 텔레메트리 모듈이 import 시점에 요구하는데 자체 의존성 목록엔
+# 빠져 있어 별도 설치 필요(실측 확인).
+posthog
 
 # --- 개발 편의 ---
 python-multipart==0.0.12
+pytest

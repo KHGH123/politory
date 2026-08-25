@@ -10,6 +10,7 @@ venv/
 
 # 데이터 / 저장소 (1회성 수집 데이터는 팀 내부 공유, 레포에는 커밋하지 않음)
 *.sqlite3
+data/
 data/raw/
 data/processed/
 
@@ -28,6 +29,10 @@ infra/terraform/tfplan
 
 # ADK 로컬 세션 (adk web 실행 시 생성)
 agent/.adk/
+
+# deepeval이 eval/run_eval.py 실행 시 로컬에 남기는 텔레메트리 캐시
+.deepeval_telemetry.txt
+eval/eval_report.json
 
 # 에디터/OS
 .vscode/

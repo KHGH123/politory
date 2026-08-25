@@ -22,11 +22,10 @@ URL 대조 검증(context_verifier 전용): context_agent가 호출한 search_ne
 정규식으로 추출해 이 목록과 대조한다. 목록에 없는 URL이 하나라도 있으면 LLM
 호출 전에 즉시 불통과 처리(retry_hint 작성)하고 exit_loop 콜백도 건너뛴다 —
 "그럴듯해 보이는 가짜 URL"은 LLM 판단보다 문자열 대조가 훨씬 확실하기 때문이다.
-speech/action 쪽은 tool이 URL을 반환하는 구조가 아직 없어 이 검증은 context에만
-적용한다(tool이 붙으면 같은 패턴을 확장할 수 있음).
-
-TODO(오케스트레이션): speech/action_agent의 output_schema가 확정되면 "tool
-호출 자체가 없었는지"를 판별하는 규칙 기반 사전 필터를 그쪽에도 확장하는 것을 검토.
+speech는 발언 ID·인용·메타데이터를 MCP 전체 발언과 대조하고, action은
+document_id·choice·집계·날짜·본문·PDF 위치를 MCP 표결 문서와 대조한다.
+두 검증 모두 도구 호출 결과가 없거나 필드가 달라지면 LLM verifier 호출 전에
+불통과 처리하고, 마지막 실패 시 미검증 info를 빈 evidence로 교체한다.
 """
 import os
 import re
@@ -37,11 +36,25 @@ from google.adk.tools import exit_loop
 from google.genai import types
 
 from .sources import speech_agent, action_agent, context_agent
+from .sources.action_evidence_validation import validate_action_info
+from .sources.speech_evidence_validation import validate_speech_info
 
 _model = os.getenv("MODEL", "gemini-3.5-flash")
 
 MAX_VERIFICATION_ITERATIONS = 2
 
+# 실측 재검토: verifier(speech/action/context) 3개에 thinking_budget=0을
+# 적용했더니 merge 단계의 각주-출처 정합 오류 재현율이 3회 중 1회에서
+# 3회 중 3회로 오히려 악화되는 게 배포 환경에서 관찰됐다. merge/guardrail
+# 자체는 손대지 않았는데 이런 변화가 났다는 건, verifier가 exit_loop
+# 여부를 덜 신중하게(추론 없이) 판단해 재검색으로 정제됐어야 할
+# speech_info/context_info가 더 뒤섞인 채로 merge에 들어갔을 가능성을
+# 시사한다 — merge가 다뤄야 할 소스가 복잡해질수록 각주 배정 실수가
+# 늘어나는 것으로 보인다. 이 가설이 확정된 건 아니지만, 확인 전까지는
+# verifier의 thinking을 원래대로 되돌린다(exit_loop 판단은 단순 분류
+# 처럼 보여도 "어디까지가 근거 있음인가"의 경계 판단에는 추론이
+# 기여했을 수 있다는 뜻 — merge/guardrail의 스키마 채우기 작업과
+# 성격이 다르다).
 _URL_PATTERN = re.compile(r"https?://[^\s\)\]\"'>]+")
 
 
@@ -110,6 +123,43 @@ def _make_url_check_callback(known_urls_key: str, info_key: str, retry_hint_key:
     return _callback
 
 
+def _check_speech_against_mcp(callback_context: CallbackContext):
+    """speech_info의 인용·메타데이터를 실제 MCP 원문과 문자열로 대조한다."""
+    valid, hint = validate_speech_info(
+        callback_context.state.get("speech_info"),
+        callback_context.state.get("speech_source_utterances", {}),
+    )
+    if valid:
+        return None
+    # 마지막 재시도까지 실패해 LoopAgent가 종료되더라도 미검증 내용이
+    # merge 단계로 넘어가지 않게 즉시 안전한 빈 결과로 교체한다.
+    callback_context.state["speech_info"] = '{"evidence": []}'
+    return types.Content(parts=[types.Part(text=hint)])
+
+
+def _check_action_against_mcp(callback_context: CallbackContext):
+    """action_info의 표결 필드를 실제 MCP search_votes 결과와 대조한다."""
+    if not callback_context.state.get("action_tool_called"):
+        callback_context.state["action_info"] = '{"evidence": []}'
+        return types.Content(
+            parts=[
+                types.Part(
+                    text="이번 검색 시도에서 search_votes가 호출되지 않았다. "
+                    "이전 결과를 재사용하지 말고 MCP 도구를 다시 호출하라."
+                )
+            ]
+        )
+    valid, hint = validate_action_info(
+        callback_context.state.get("action_info"),
+        callback_context.state.get("action_source_votes", {}),
+    )
+    if valid:
+        return None
+    # 마지막 재시도까지 실패해도 미검증 표결이 merge로 넘어가지 않게 한다.
+    callback_context.state["action_info"] = '{"evidence": []}'
+    return types.Content(parts=[types.Part(text=hint)])
+
+
 def _make_verifier(
     name: str, info_key: str, retry_hint_key: str, check_own_actions_only: bool = False
 ) -> Agent:
@@ -132,7 +182,21 @@ def _make_verifier(
         결과, 제3자(야당/시민단체/평론가 등)의 평가·비판만 있고 대상 인물
         본인의 직접 발언·행동 인용이 전혀 없는 섹션이 있다면, 그것도 근거
         불분명으로 판정한다. retry_hint에 "본인이 직접 한 말·행동이 인용된
-        기사만 남기고, 순수 여론조사·제3자 평가는 제외하라"고 남겨라."""
+        기사만 남기고, 순수 여론조사·제3자 평가는 제외하라"고 남겨라.
+
+        4-1) 간접 재인용 주의: 대상 인물의 발언이 따옴표로 등장하더라도,
+        그 문장 전체의 실제 화자·행위 주체가 제3자인 경우가 있다(예: "OOO
+        평론가는 이 대통령의 '정부 이기는 시장이 없다'는 발언을 두고 '권력의
+        오만'이라 비판했다" — 따옴표 속 문구는 대상 인물이 한 말이지만, 이
+        문장 전체는 OOO 평론가가 그 발언을 인용하며 비판한 기사이지 대상
+        인물이 그 시점에 직접 발언·행동한 기사가 아니다). [context_info]가
+        이런 재인용을 마치 대상 인물이 그 시점에 직접 발언한 것처럼
+        ("~라는 취지의 발언을 남겼다", "~라고 말했다") 다시 서술했다면, 이것도
+        근거 불분명으로 판정한다. 핵심 동사(말했다/발언했다/주장했다 등)의
+        주어가 대상 인물 자신인지, 그 발언을 인용하며 논평하는 제3자인지
+        반드시 구분해서 판단하라. retry_hint에 "이 발언은 제3자가 인용·비판한
+        기사에서 나온 것이지 대상 인물이 직접 한 발언이 아니다 — 대상 인물이
+        스스로 발언·행동한 것으로 명시된 기사만 남기라"고 남겨라."""
         if check_own_actions_only
         else ""
     )
@@ -198,6 +262,12 @@ context_verifier.before_agent_callback = _make_url_check_callback(
     info_key="context_info",
     retry_hint_key="context_retry_hint",
 )
+
+# speech_verifier: LLM 판단 전에 실제 MCP 전체 발언과 결정적으로 대조한다.
+speech_verifier.before_agent_callback = _check_speech_against_mcp
+
+# action_verifier: LLM 판단 전에 실제 MCP 표결 필드와 결정적으로 대조한다.
+action_verifier.before_agent_callback = _check_action_against_mcp
 
 speech_verified_loop = LoopAgent(
     name="speech_verified_loop",

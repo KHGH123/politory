@@ -24,6 +24,8 @@ WORKDIR /app
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
+# MCP/ADK 버전 불일치를 Cloud Run 시작 시점이 아니라 이미지 빌드에서 차단한다.
+RUN python -c "from mcp.client.streamable_http import McpHttpClientFactory"
 
 COPY . .
 COPY --from=frontend-build /app/frontend/dist ./backend/static

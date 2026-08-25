@@ -198,6 +198,9 @@ def classify(request: ClassifyRequest) -> ClassifyResponse:
     부족하면 관련 키워드 후보 최대 3개를 이유와 함께 추천해서
     프론트가 화면2(키워드 선택)를 보여줄 수 있게 한다.
     """
+    if not request.question.strip():
+        raise HTTPException(status_code=400, detail="질문을 입력해주세요.")
+
     prompt = f"""사용자 질문: "{request.question}"
 
 이 질문에서 국회의원 이름으로 보이는 고유명사가 있으면 정당명·직함(대표, 원내대표 등)을
@@ -232,12 +235,20 @@ def classify(request: ClassifyRequest) -> ClassifyResponse:
 
     # LLM이 "이 사람이 실존 의원인지"를 자체 판단하게 두지 않고, BigQuery MP
     # 테이블 조회로 확정한다.
+    member_not_found = False
     if result.member_name:
         candidates = _find_members_by_name(result.member_name)
         if len(candidates) == 0:
-            # DB에 없으면 무조건 화면2(정책/키워드 확인)로 보낸다.
+            # DB에 없으면 무조건 화면2(정책/키워드 확인)로 보낸다. 이때 keywords는
+            # 반드시 비워야 한다 — LLM이 member_name을 실존 의원이라고 착각한
+            # 상태에서 만든 키워드라(예: "윤석열이 뭐하는 사람이야" -> 키워드로
+            # "의대 정원 확대" 등 정부 정책을 추천), 존재하지 않는 인물과 관련된
+            # 것처럼 보이는 키워드를 그대로 두면 사용자가 그걸 눌러 인물 미확정
+            # 상태로 조회가 나가는 문제가 있었다(실사용 중 발견, 2026-08-23).
             result.sufficient = False
             result.member_name = None
+            result.keywords = []
+            member_not_found = True
         elif len(candidates) > 1:
             # 동명이인 — 어느 쪽인지 특정 안 되니 화면2에서 사용자가 직접 고르게 한다.
             result.sufficient = False
@@ -252,6 +263,30 @@ def classify(request: ClassifyRequest) -> ClassifyResponse:
         if committee_matches:
             result.member_candidates = committee_matches
             result.keywords = []
+
+    if not result.member_name and not result.member_candidates and llm_result.committee_guess:
+        # 인물이 없거나(정책만 있는 질문) DB에 없는 인물이면, "검색축은 인물"이라는
+        # 원칙에 따라 정책 키워드 대신 그 정책을 다루는 상임위 소속 실제 의원을
+        # 추천 카드로 보여준다. committee_guess 자체는 DB에 없을 수도 있으니
+        # (오타/변형 표기), 매칭되는 의원이 없으면 정책 키워드로 폴백한다 —
+        # 단, member_not_found(실존하지 않는 인물을 지칭한 경우)에는 이미 위에서
+        # keywords를 비웠으니 그대로 빈 채로 둔다(엉뚱한 사람 이름에 낚여
+        # 상임위를 추천하는 것도 부적절하므로 committee_guess 자체를 쓰지 않는다).
+        if not member_not_found:
+            committee_matches = _find_members_by_committee(llm_result.committee_guess)
+            if committee_matches:
+                result.member_candidates = committee_matches
+                result.keywords = []
+
+    # keywords는 "인물은 확정됐고 주제만 좁히면 되는" 경우에만 의미가 있다.
+    # 프롬프트로 "member_name 없으면 keywords 비워두라"고 지시했지만 LLM이
+    # 그 지시를 어기고 member_name=null인데 keywords를 채우는 경우가 실측으로
+    # 확인됐다(예: "윤석열이 뭐하는 사람이야" -> member_name=null인데
+    # keywords로 "국정운영" 등 채워 넣음 — 위의 member_not_found 분기가 막는
+    # 경로와 달리 애초에 LLM이 member_name을 null로 낸 경우라 그 분기를 타지
+    # 않고 새어나갔다). LLM 판단에 기대지 않고 여기서 무조건 강제한다.
+    if not result.member_name:
+        result.keywords = []
 
     return result
 
@@ -305,23 +340,39 @@ async def _run_agent(question: str, member_name: str | None, keyword: str | None
         app_name="politory_agent", user_id="backend", session_id=session_id
     )
 
-    final_answer: AgentResponse | None = None
-    async for event in _agent_runner.run_async(
+    async for _event in _agent_runner.run_async(
         user_id="backend",
         session_id=session_id,
         new_message=genai_types.Content(
             role="user", parts=[genai_types.Part(text=combined_question)]
         ),
     ):
-        if event.author == "guardrail" and event.content and event.content.parts:
-            text = "".join(p.text or "" for p in event.content.parts)
-            if text:
-                final_answer = AgentResponse.model_validate_json(text)
+        pass  # 최종 결과는 아래에서 세션 state를 직접 읽는다 (이유는 주석 참고)
 
-    if final_answer is None:
+    # guardrail이 직접 생성한 이벤트(event.content)가 아니라 실행이 끝난 뒤
+    # 세션을 다시 조회해서 state["final_answer"]를 읽는다. guardrail의
+    # after_agent_callback(_verify_excerpts, _resolve_footnotes)이 state를
+    # 고쳐도 반환값은 None이라, ADK가 그 상태 변경만으로 만드는 이벤트는
+    # content=None이다(google/adk/agents/base_agent.py의
+    # _handle_after_agent_callback 확인) — event.content로 걸러 읽으면 그
+    # 상태 변경 이전의 guardrail 원본 LLM 출력을 그대로 쓰게 되어, excerpt
+    # 정합성 검증과 각주 재계산이 실제 API 응답에 반영되지 않는 버그가 있었다.
+    # 세션을 다시 읽으면 콜백이 반영된 최종 state를 확실히 얻는다.
+    session = await _session_service.get_session(
+        app_name="politory_agent", user_id="backend", session_id=session_id
+    )
+    final_state_answer = session.state.get("final_answer") if session else None
+
+    if final_state_answer is None:
         # 파이프라인이 끝까지 돌았는데 guardrail 출력이 안 잡힌 비정상 케이스 —
         # 사용자에게는 원인불명 500 대신 "답변을 만들지 못했다"로 명확히 알린다.
         return AgentResponse(answer="답변을 생성하지 못했습니다. 다시 시도해주세요.", sources=[])
+
+    final_answer = (
+        final_state_answer
+        if isinstance(final_state_answer, AgentResponse)
+        else AgentResponse.model_validate(final_state_answer)
+    )
 
     # merge instruction이 answer는 "시간순으로 나열하라"고 지시하지만 sources
     # 배열 자체의 정렬은 강제하지 않아서, 실제로 날짜가 뒤섞여 나오는 걸
@@ -366,6 +417,14 @@ def _source_sort_key(source: AgentSource) -> tuple[int, date]:
 
 @app.post("/api/query", response_model=QueryResponse)
 async def query(request: QueryRequest) -> QueryResponse:
+    # 프론트는 빈 질문을 제출 전에 막지만(App.jsx classifyAndRoute), 이
+    # 엔드포인트는 그 검증을 거치지 않고 직접 호출될 수 있다(예: 화면2에서
+    # /api/classify 없이 바로 여기로 오는 경로, 또는 API 직접 호출). 빈
+    # question을 그대로 에이전트에 넘기면 query_processing/context_agent가
+    # 질문 없이도 아무 정치 이슈나 지어내 답하는 걸 실측으로 확인했다(P-04).
+    if not request.question.strip():
+        raise HTTPException(status_code=400, detail="질문을 입력해주세요.")
+
     profile = (
         _get_member_profile(request.member_name, request.party) if request.member_name else None
     )
