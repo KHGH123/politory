@@ -450,6 +450,7 @@ async def _run_agent_stream(
     member_name: str | None,
     keyword: str | None,
     legislator_id: str | None = None,
+    diagnostics_out: dict | None = None,
 ):
     """root_agent를 한 번 실행하며 (진행 문구, 최종 AgentResponse|None)을 순서대로 yield한다.
 
@@ -771,7 +772,22 @@ async def _run_agent_stream(
     session = await _session_service.get_session(
         app_name="politory_agent", user_id="backend", session_id=session_id
     )
-    final_state_answer = session.state.get("final_answer") if session else None
+    state = session.state if session else {}
+    final_state_answer = state.get("final_answer")
+    route = state.get("route", {}) or {}
+    if hasattr(route, "model_dump"):
+        route = route.model_dump()
+    diagnostics = {
+        "route": dict(route) if isinstance(route, dict) else {},
+        "executed_agents": {
+            "speech": bool(state.get("speech_tool_called", False)),
+            "action": bool(state.get("action_tool_called", False)),
+            "context": bool(state.get("context_tool_called", False)),
+        },
+    }
+    if diagnostics_out is not None:
+        diagnostics_out.clear()
+        diagnostics_out.update(diagnostics)
 
     if final_state_answer is None:
         # 파이프라인이 끝까지 돌았는데 guardrail 출력이 안 잡힌 비정상 케이스 —
@@ -800,6 +816,28 @@ async def _run_agent_stream(
     final_answer.sources = sorted(final_answer.sources, key=_source_sort_key)
     _resolve_footnote_numbers(final_answer)
     yield None, final_answer
+
+
+async def _run_agent_with_diagnostics(
+    question: str,
+    member_name: str | None,
+    keyword: str | None,
+    legislator_id: str | None = None,
+) -> tuple[AgentResponse, dict]:
+    """평가용 실행 경로. API 응답과 별도로 라우팅·도구 호출 정보를 반환한다."""
+    final_answer: AgentResponse | None = None
+    diagnostics: dict = {}
+    async for _label, response in _run_agent_stream(
+        question,
+        member_name,
+        keyword,
+        legislator_id,
+        diagnostics_out=diagnostics,
+    ):
+        if response is not None:
+            final_answer = response
+    assert final_answer is not None
+    return final_answer, diagnostics
 
 
 async def _run_agent(

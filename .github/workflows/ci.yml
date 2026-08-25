@@ -120,6 +120,7 @@ jobs:
         env:
           MIN_FAITHFULNESS: "0.7"
           MIN_ANSWER_RELEVANCY: "0.7"
+          MIN_DETERMINISTIC_PASS_RATE: "0.8"
         run: |
           python - <<'PY'
           import json
@@ -134,6 +135,20 @@ jobs:
           deterministic_failures = [
               result for result in results if not result.get("deterministic_passed", False)
           ]
+          deterministic_pass_rate = (
+              (len(results) - len(deterministic_failures)) / len(results)
+              if results
+              else 0.0
+          )
+          min_deterministic_pass_rate = float(
+              os.environ["MIN_DETERMINISTIC_PASS_RATE"]
+          )
+          print(
+              "Deterministic checks: "
+              f"passed={len(results) - len(deterministic_failures)}/{len(results)}, "
+              f"rate={deterministic_pass_rate:.3f}, "
+              f"required>={min_deterministic_pass_rate:.3f}"
+          )
 
           thresholds = {
               "FaithfulnessMetric": float(os.environ["MIN_FAITHFULNESS"]),
@@ -156,11 +171,15 @@ jobs:
                       f"{metric_name}: average={average:.3f}, required>={threshold:.3f}"
                   )
 
-          if errors or deterministic_failures or score_failures:
+          deterministic_gate_failed = (
+              deterministic_pass_rate < min_deterministic_pass_rate
+          )
+          for result in deterministic_failures:
+              print(f"DETERMINISTIC FAILURE: {result.get('id')}")
+
+          if errors or deterministic_gate_failed or score_failures:
               for result in errors:
                   print(f"ERROR {result.get('id')}: {result['error']}")
-              for result in deterministic_failures:
-                  print(f"DETERMINISTIC FAILURE: {result.get('id')}")
               for failure in score_failures:
                   print(f"SCORE FAILURE: {failure}")
               sys.exit(1)

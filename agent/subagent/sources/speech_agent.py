@@ -46,6 +46,7 @@ def _record_speech_evidence(tool, args, tool_context, tool_response):
     if not tool.name.endswith("retrieve_speech_evidence"):
         return None
 
+    tool_context.state["speech_tool_called"] = True
     # 실제 검색에 사용한 ID를 보존해 verifier가 반환 발언의 ID와 대조한다.
     confirmed_id = tool_context.state.get("requested_legislator_id")
     tool_context.state["speech_requested_legislator_id"] = (
