@@ -116,7 +116,7 @@ function RefineScreen({
         {/* 파이프라인 구조(agent/agent.py: query_processing -> fetch(병렬
             action/speech/context) -> merge -> guardrail)를 그대로 5칸
             트래커로 보여준다 — "에이전트 구조가 좀 더 시각화됐으면"이라는
-            피드백. 자료 조회 칸은 3개 칩을 나란히 그려 "여기가 동시에
+            피드백. 자료 조회 칸은 3개 상태를 색상 원으로 그려 "여기가 동시에
             돈다"는 걸 직관적으로 전달한다(실제로 ParallelAgent). 각 칸의
             상태(대기/진행중/완료)는 computeStepStatuses(utils.js)가
             progressLog 하나로부터 계산한다 — 아래 로그와 상태 계산 근거는
@@ -128,15 +128,24 @@ function RefineScreen({
               const status = stepStatuses[step.key]
               const overall = step.parallel ? status.overall : status
               return (
-                <li key={step.key} className={`stepper-node status-${overall}`}>
+                <li key={step.key} className={`stepper-node status-${overall}${step.parallel ? ' is-parallel' : ''}`}>
                   <span className="stepper-dot" aria-hidden="true" />
                   {step.parallel ? (
-                    <span className="stepper-chips">
-                      {step.stages.map((s) => (
-                        <span key={s} className={`stepper-chip status-${status.sub[s]}`} data-stage={s}>
-                          {step.stageLabels[s]}
-                        </span>
-                      ))}
+                    <span className="stepper-parallel">
+                      <span className="stepper-label">{step.label}</span>
+                      <span className="stepper-chips">
+                        {step.stages.map((s) => (
+                          <span
+                            key={s}
+                            className={`stepper-chip status-${status.sub[s]}`}
+                            data-stage={s}
+                            title={step.stageLabels[s]}
+                            aria-label={`${step.stageLabels[s]}: ${status.sub[s]}`}
+                          >
+                            {step.stageLabels[s]}
+                          </span>
+                        ))}
+                      </span>
                     </span>
                   ) : (
                     <span className="stepper-label">{step.label}</span>

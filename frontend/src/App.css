@@ -113,22 +113,18 @@ body {
   padding: 0;
 }
 
-/* 진행 상태 배지(로그 한 줄) — 파이프라인 단계마다 다른 색조를 준다
-   (progressStageOf가 문구를 stage 키로 분류해 data-stage로 내려줌).
-   "글자 색이 계속 똑같아 밋밋하다"는 피드백을 받아, 법안/회의록/뉴스/종합/
-   검증 단계가 서로 다른 색으로 보이게 했다 — 사용자가 지금 어떤 종류의
-   자료를 훑는 중인지 색만 보고도 감을 잡을 수 있다. 기본값(data-stage
-   없음, 예: "질문 분석 중...")은 brass로 폴백. 가장 최근 줄만 진하게,
-   지난 줄(.is-past)은 옅게 가라앉혀 "지금 여기가 현재"임을 드러낸다. */
+/* 진행 상태는 서비스의 종이·남색 팔레트 안에서 통일한다. 단계 구분은 색을
+   늘리는 대신 레이블과 명도로 전달하고, 현재 줄만 왼쪽 남색 선으로 강조한다. */
 .hint-badge {
   display: inline-flex;
   align-items: center;
   gap: 10px;
   padding: 9px 16px;
-  border-radius: 999px;
-  background: var(--stage-bg, var(--brass-bg));
-  border: 1px solid var(--stage-border, var(--brass-light));
-  box-shadow: 0 1px 0 rgba(169, 130, 46, 0.08);
+  border-radius: 3px;
+  background: var(--stage-bg, #f8f7f2);
+  border: 1px solid var(--stage-border, var(--line));
+  border-left: 3px solid var(--stage-fg, var(--navy));
+  box-shadow: none;
   animation: fadeSlideIn 0.3s ease-out;
   transition:
     background-color 0.35s ease,
@@ -136,7 +132,7 @@ body {
     opacity 0.35s ease;
 }
 .hint-badge.is-past {
-  opacity: 0.45;
+  opacity: 0.52;
   box-shadow: none;
 }
 /* 아직 그 레인에 이벤트가 안 온 상태의 자리표시. is-past보다도 더 옅게 —
@@ -179,6 +175,12 @@ body {
   color: var(--muted);
   text-align: center;
 }
+.lane[data-stage='action'] .lane-label,
+.lane[data-stage='speech'] .lane-label,
+.lane[data-stage='context'] .lane-label {
+  color: var(--stage-fg);
+  font-weight: 500;
+}
 .lane-log {
   margin: 0;
   max-width: none;
@@ -190,7 +192,7 @@ body {
   box-sizing: border-box;
   justify-content: flex-start;
   padding: 7px 10px;
-  border-radius: 10px;
+  border-radius: 3px;
 }
 .lane-log .hint-text {
   font-size: 11.5px;
@@ -205,42 +207,28 @@ body {
   }
 }
 
-/* stage별 --stage-* 색상 정의. .hint-badge와 .stepper-chip(아래) 둘 다
-   [data-stage]로 이 값을 물려받는다 — 로그 배지와 스테퍼 칩이 같은 팔레트를
-   쓰게 해서 "지금 이 배지가 스테퍼의 어느 칸과 같은 일인지" 색으로도
-   연결되게 한다. */
-/* 다섯 stage 모두 같은 패턴(밝은 tint 배경 + 중간 톤 보더 + 짙은 글자색)으로
-   통일한다 — 예전엔 context/synthesis/verify 셋만 짙은 배경(#2f4a3d 등)을
-   써서 action/speech(밝은 배경)와 톤이 안 맞고 화면에서 유독 무겁게
-   튀었다("색이 진하다"는 피드백). 색상환은 유지하되 밝기만 다 같이
-   맞췄다. */
+/* 병렬 조회 3개 레인만 키워드 카드의 황동·녹색·와인 강조색으로 구분한다.
+   배경은 모두 같게 두어 색이 UI 전체를 덮지 않도록 한다. */
 [data-stage='action'] {
-  --stage-bg: #e7edf5;
-  --stage-border: #9db3cc;
-  --stage-fg: var(--navy-2, #2e4460);
+  --stage-bg: #f8f7f2;
+  --stage-border: var(--line);
+  --stage-fg: var(--brass);
 }
 [data-stage='speech'] {
-  /* brass(놋쇠/노란빛)였다가 "회의록은 노란색 말고 다른 색으로"라는
-     피드백으로 와인(자주) 계열로 바꿨다 — action(파랑)/context(녹색)/
-     synthesis(보라)/verify(적갈색)와 겹치지 않는 다섯 번째 색상. */
-  --stage-bg: #f5e9f0;
-  --stage-border: #c98fb0;
-  --stage-fg: #8a3d68;
+  --stage-bg: #f8f7f2;
+  --stage-border: var(--line);
+  --stage-fg: var(--agree);
 }
 [data-stage='context'] {
-  --stage-bg: #e9f2ec;
-  --stage-border: #9dc4ab;
-  --stage-fg: #3d6b4f;
+  --stage-bg: #f8f7f2;
+  --stage-border: var(--line);
+  --stage-fg: var(--danger);
 }
-[data-stage='synthesis'] {
-  --stage-bg: #eeeaf5;
-  --stage-border: #b7a4d6;
-  --stage-fg: #5b4a80;
-}
+[data-stage='synthesis'],
 [data-stage='verify'] {
-  --stage-bg: #f5e9ea;
-  --stage-border: #cf9a9c;
-  --stage-fg: #8b3a3a;
+  --stage-bg: #f8f7f2;
+  --stage-border: var(--line);
+  --stage-fg: var(--navy);
 }
 
 .hint-text {
@@ -248,7 +236,7 @@ body {
   font-size: 13px;
   font-weight: 500;
   letter-spacing: 0.01em;
-  color: var(--stage-fg, var(--brass));
+  color: var(--stage-fg, var(--navy));
   transition: color 0.35s ease;
 }
 
@@ -263,7 +251,7 @@ body {
   width: 5px;
   height: 5px;
   border-radius: 50%;
-  background: var(--stage-fg, var(--brass-light));
+  background: var(--stage-fg, var(--navy));
   animation: hintDotPulse 1.2s ease-in-out infinite;
   transition: background-color 0.35s ease;
 }
@@ -338,7 +326,7 @@ body {
 }
 .stepper-node.status-done:not(:last-child)::after {
   border-top-style: solid;
-  border-top-color: var(--brass-light);
+  border-top-color: var(--navy-2);
 }
 
 .stepper-dot {
@@ -355,13 +343,13 @@ body {
   z-index: 1;
 }
 .stepper-node.status-active .stepper-dot {
-  border-color: var(--brass);
-  background: var(--brass-bg);
+  border-color: var(--navy);
+  background: #fff;
   animation: hintDotPulse 1.2s ease-in-out infinite;
 }
 .stepper-node.status-done .stepper-dot {
-  border-color: var(--brass);
-  background: var(--brass);
+  border-color: var(--navy);
+  background: var(--navy);
 }
 /* 완료 체크 표시 — 별도 아이콘 없이 순수 CSS로 그린 작은 체크. */
 .stepper-node.status-done .stepper-dot::after {
@@ -389,42 +377,88 @@ body {
   font-weight: 500;
 }
 
-/* 자료 조회 칸 — ParallelAgent(fetch)를 그대로 반영해 3개 칩을 나란히
-   그린다. "여기가 동시에 돈다"는 걸 한 칸 안에 압축해서 보여주는 지점. */
+/* 자료 조회 칸 — 세 항목을 가로 상태 원으로 압축한다. 화면에서는 색과
+   모양으로, 접근성 트리와 title에서는 각 자료원 이름으로 구분한다. */
+.stepper-node.is-parallel {
+  flex: 1.25;
+}
+.stepper-parallel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 7px;
+}
 .stepper-chips {
   display: flex;
-  gap: 4px;
-  flex-wrap: wrap;
+  align-items: center;
   justify-content: center;
+  gap: 10px;
 }
 .stepper-chip {
-  font-family: var(--mono);
-  font-size: 10px;
-  padding: 3px 7px;
-  border-radius: 999px;
-  color: var(--muted);
-  border: 1px solid var(--line);
-  background: #fff;
+  position: relative;
+  width: 12px;
+  height: 12px;
+  font-size: 0;
   transition:
-    color 0.3s ease,
-    border-color 0.3s ease,
-    background-color 0.3s ease;
+    transform 0.3s ease,
+    opacity 0.3s ease;
+}
+.stepper-chip::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 10px;
+  height: 10px;
+  border: 1.5px solid var(--line);
+  border-radius: 50%;
+  background: #fff;
+  transform: translate(-50%, -50%);
+  box-sizing: border-box;
 }
 .stepper-chip.status-active {
-  color: var(--stage-fg);
-  border-color: var(--stage-border);
-  background: var(--stage-bg);
-  font-weight: 500;
+  transform: scale(1.08);
+}
+.stepper-chip.status-active::before {
+  border-color: var(--stage-fg);
+  background: var(--stage-fg);
+  animation: statusMarkerPulse 1.2s ease-in-out infinite;
+}
+@keyframes statusMarkerPulse {
+  0%,
+  80%,
+  100% {
+    opacity: 0.35;
+    transform: translate(-50%, -50%) scale(0.82);
+  }
+  40% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
 }
 .stepper-chip.status-done {
-  color: var(--stage-fg);
-  border-color: var(--stage-border);
-  background: var(--stage-bg);
-  opacity: 0.7;
+  opacity: 0.72;
+}
+.stepper-chip.status-done::before {
+  content: '✓';
+  width: 11px;
+  height: 11px;
+  border: 0;
+  background: var(--stage-fg);
+  color: #fff;
+  font-family: var(--sans);
+  font-size: 8px;
+  font-weight: 700;
+  line-height: 11px;
+  text-align: center;
+  transform: translate(-50%, -50%);
 }
 
 @media (prefers-reduced-motion: reduce) {
   .stepper-node.status-active .stepper-dot {
+    animation: none;
+  }
+  .stepper-chip.status-active::before {
     animation: none;
   }
 }
@@ -718,14 +752,15 @@ body {
   font-size: 21px;
 }
 .profile-party {
-  font-family: var(--sans);
+  font-family: var(--mono);
   font-size: 12px;
-  font-weight: 600;
-  color: var(--brass);
-  background: var(--brass-bg);
-  border: 1px solid var(--brass-light);
-  padding: 4px 14px;
-  border-radius: 999px;
+  font-weight: 500;
+  color: var(--navy);
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--brass);
+  padding: 5px 10px;
+  border-radius: 3px;
 }
 .profile-detail-rows {
   flex: 1;
