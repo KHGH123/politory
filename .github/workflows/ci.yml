@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   api-test:
-    name: Backend API test
+    name: API and agent validation tests
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
