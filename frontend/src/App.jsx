@@ -119,7 +119,6 @@ function App() {
     keywordValue,
   ) {
     setQuestion(effectiveQuestion)
-    if (memberNameValue) setMemberName(memberNameValue)
     setLoading(true)
     setProgressLog([])
     setError(null)
