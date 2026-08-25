@@ -50,7 +50,6 @@ class Settings(BaseSettings):
     # NotFound(대소문자 구분)가 나는 걸 실측으로 확인해 기본값을 고쳤다.
     BIGQUERY_MEMBERS_TABLE: str = "mps"
     BIGQUERY_BILLS_TABLE: str = ""
-    BIGQUERY_SPEECHES_TABLE: str = ""
 
     # Vertex AI Search (RAG)
     SEARCH_APP_ID: str = ""
