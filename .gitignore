@@ -37,6 +37,7 @@ eval/eval_report.json
 # 에디터/OS
 .vscode/
 .idea/
+.claude/
 .DS_Store
 
 API.md

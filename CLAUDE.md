@@ -4,11 +4,11 @@
 
 ## 프로젝트 개요
 
-Politory(의정기록) — 정치인의 특정 정책·사회 이슈에 대한 과거 발언과 정치 활동을 시간순으로 수집·분석하여, 사용자가 **입장 변화와 그 근거를 한눈에 확인**할 수 있도록 제공하는 AI 기반 정치 행적 검색 서비스. Ajou PBL 2차 Team 프로젝트(4인 팀)이며, 현재 대부분 모듈이 `raise NotImplementedError` 형태의 스텁으로 인터페이스만 잡혀 있고 실제 구현은 안 된 상태입니다.
+Politory(의정기록) — 정치인의 특정 정책·사회 이슈에 대한 과거 발언과 정치 활동을 시간순으로 수집·분석하여, 사용자가 **입장 변화와 그 근거를 한눈에 확인**할 수 있도록 제공하는 AI 기반 정치 행적 검색 서비스. Ajou PBL 2차 Team 프로젝트(4인 팀). `frontend` → `backend/main.py` → ADK 멀티 에이전트 파이프라인(`agent/`) → BigQuery + Vertex AI Search 데이터까지 엔드투엔드로 이미 구현되어 Cloud Run에 배포되어 있습니다.
 
 **해결하려는 문제**: 의원의 발의·표결·발언은 의안정보시스템·표결정보시스템·회의록시스템에 각각 흩어져 있어, 특정 의원이 한 이슈에 대해 무엇을 해왔는지 알려면 여러 곳을 수작업으로 엮어야 한다. 특히 표결·의안은 정형 데이터로 제공되지만 **발언은 비정형 회의록에 묻혀 의원 단위 조회가 사실상 불가능**하다.
 
-핵심 제약(`docs/`, PBL 제출 문서 참고):
+핵심 제약(PBL 제출 문서 참고):
 - 검색축은 정책 키워드가 아니라 **인물(의원)** — 키워드는 타임라인을 좁히는 필터일 뿐이다.
 - 같은 의원의 시간차 발언을 병치할 때 **"입장이 바뀌었다" 같은 해석적 판단을 AI가 직접 생성하지 않는다.** 정권 교체·여야 지위·사회적 상황 등 맥락을 근거와 함께 제공하고, 입장 변화가 합리적인지 판단하는 건 어디까지나 사용자 몫이다. `agent/subagent/evidence_synthesis.py`의 `guardrail`이 응답 생성 후 이 위반 여부를 검사한다(실제 해석적 판단 문장을 탐지·제거하는 것까지 테스트로 확인됨). 이와 별개로 `agent/subagent/source_verification.py`는 각 소스의 진술이 실제 도구 결과에 근거하는지(hallucination 여부)를 검사한다 — "해석" 문제와 "사실 근거" 문제는 서로 다른 계층에서 다룬다.
 - 1차 출처(회의록 원문, 법안, 표결)와 2차 출처(뉴스 보도)는 응답에서 **신뢰도를 구분해서 표시**해야 한다.
@@ -32,20 +32,24 @@ docker compose up --build
 # Day 1 데이터소스 검증 (열린국회정보 API 실제 응답 구조 확인)
 python scripts/verify_data_source.py --api-id <API_ID>
 
-# 1회성 데이터 수집 / DB 초기화 (현재 미구현 스텁)
-python -m pipeline.collect_assembly_api
-python scripts/setup_db.py
-python scripts/setup_chroma.py
+# 국회의원 인적사항 수집 (BigQuery mps 테이블 적재)
+python -m pipeline.collect_members
 
-# 평가 (Ragas/DeepEval, 현재 미구현)
+# 국회 회의록 PDF 수집 -> BigQuery/Vertex AI Search 파이프라인 (옵션은 pipeline/README.md 참고)
+python -m pipeline.collect_assembly --pdf-only
+python -m pipeline.rebuild_pdf_tables
+python -m pipeline.normalize_legislators
+python -m pipeline.build_search_documents
+
+# 평가 (DeepEval, backend._run_agent_with_diagnostics를 실제로 호출)
 python -m eval.run_eval
 ```
 
-테스트 스위트나 린터, 프론트엔드 스캐폴드는 아직 없습니다. `frontend/`는 의도적으로 전담자가 없으며("각자 자기 파트 화면을 바이브코딩으로 붙인다"), 새로 시작할 때는 `npm create vite@latest . -- --template react`로 부트스트랩합니다.
+테스트: `python -m pytest tests/test_api.py agent/subagent/sources/test_speech_evidence_validation.py agent/subagent/sources/test_action_evidence_validation.py -v` (PR마다 `.github/workflows/ci.yml`이 동일하게 돌립니다). 린터: `frontend/`에 `oxlint`(`.oxlintrc.json`) 설정이 있습니다. `frontend/`는 의도적으로 전담자가 없으며("각자 자기 파트 화면을 바이브코딩으로 붙인다") React(Vite)로 이미 구현되어 있습니다.
 
 ## 아키텍처
 
-요청 흐름: `frontend` → `backend/main.py` (FastAPI, `POST /api/query` 단일 엔드포인트) → `agent/agent.py`의 `root_agent` → `query_processing`(라우팅) → `fetch`(speech/action/context를 각각 검증 루프로 감싸 병렬 실행) → `evidence_synthesis`(merge → guardrail) → 출처 라벨링된 응답.
+요청 흐름: `frontend` → `backend/main.py`(FastAPI. `/api/classify`로 질문 충분성 판단 후 `/api/query`(또는 스트리밍 진행 이벤트가 필요하면 `/api/query/stream`)로 조회 — 필드는 `API.md` 참고) → `agent/agent.py`의 `root_agent` → `query_processing`(라우팅) → `fetch`(speech/action/context를 각각 검증 루프로 감싸 병렬 실행) → `evidence_synthesis`(merge → guardrail) → 출처 라벨링된 응답.
 
 역할 분담: **오케스트레이션 담당**(query_processing, fetch의 조립 뼈대, source_verification,
 evidence_synthesis, agent.py)과 **소스 에이전트 담당**(agent/subagent/sources/의
@@ -82,53 +86,56 @@ agent/       ADK(google-adk) 기반 오케스트레이션 + 가드레일.
                           iteration의 source agent가 참고하게 한다. "정보 없음"을 명시한
                           정상 응답은 hallucination이 아니라 근거 있음으로 판단하도록
                           instruction에 명시(안 그러면 매번 재시도만 반복).
-    sources/              (담당: 다른 팀원) 개별 소스 에이전트.
-      speech_agent.py       (구 rag_search_agent) 발언 벡터 검색. output_key="speech_info".
-      action_agent.py       (구 api_search_agent) 법안/표결/의원정보 API 조회.
+    sources/              개별 소스 에이전트. tools는 이미 모두 연결되어 있다.
+      speech_agent.py       MCPToolset(HTTP, mcp_server/ 경유)로 resolve_legislator/
+                            retrieve_speech_evidence 호출 -> 회의록 발언 근거 수집.
+                            output_key="speech_info".
+      action_agent.py       MCPToolset(HTTP)로 search_votes 호출 -> 국회 본회의
+                            전자투표 근거 수집(발의·위원회 표결은 다루지 않음).
                             output_key="action_info".
-      context_agent.py      (구 news_search_agent) 뉴스/정치적 맥락 검색.
-                            output_key="context_info".
-                            각 파일의 tools=[]를 agent/tools/의 함수(mcp_server/ 경유)로
-                            채우는 게 이 담당자의 몫. instruction에 이미
-                            {speech_retry_hint?} 등 재검색 지시 참조가 최소한으로
-                            반영되어 있으니 tools 연결 시 그대로 유지할 것.
-                            알려진 이슈: tools=[]인 지금 상태에서 LLM이 간헐적으로
-                            존재하지 않는 tool(예: "directory::list_tools")을 호출하려
-                            시도해 `ValueError: Tool '...' not found`로 파이프라인이
-                            죽는 경우가 있음(재현율 낮음, adk web에서 같은 질문
-                            반복 실행 중 관찰). tools를 실제로 연결하면 LLM이 진짜
-                            tool 목록을 보게 되므로 자연 해소될 것으로 예상 —
-                            연결 후에도 재현되면 별도로 다룰 것.
+      context_agent.py      agent/tools/web_search_tool.py의 search_news(FunctionTool,
+                            NAVER API HUB 뉴스 검색)를 MCP 없이 직접 호출 -> 뉴스/
+                            정치적 맥락 검색. output_key="context_info".
     evidence_synthesis.py  (구 merge.py + guardrail.py 통합) SequentialAgent 2단계:
                           merge(근거 종합 + AgentResponse 스키마로 구조화, output_key=
                           "draft_response") -> guardrail(draft_response.answer의
                           해석적 판단 문장만 검사·제거, sources는 손대지 않고 그대로
-                          통과, output_key="final_answer"). 응답 스키마는 아래
-                          "a2a agent 입력 출력 형식" 절 참고 — 그 표의 answer/sources
-                          구조를 그대로 pydantic AgentResponse로 구현한 것.
-  tools/            각 데이터 소스별 비즈니스 로직. mcp_server/를 통해 MCP 툴로 감싸서
-                     노출할 예정 — mcp_server/README.md의 FunctionTool/stdio 패턴과
-                     agent/agent.py 쪽의 MCPToolset + StdioServerParameters 클라이언트
-                     연결 참고. 현재 subagent/sources/의 각 소스 에이전트는
-                     tools=[]로 비어 있음.
-mcp_server/  agent/tools/의 함수들을 MCP(stdio)로 노출해 ADK 에이전트가 호출하게 함.
-rag/         chroma_client.py(ChromaDB 컬렉션 접근), embed.py(Vertex AI 텍스트 임베딩,
-             sentence-transformers 대안), retriever.py(member_name/keyword로 필터링
-             가능한 벡터 검색).
-pipeline/    1회성/수동 재실행 스크립트(스케줄링 없음)로 데이터를 수집·정규화:
-               collect_assembly_api.py  열린국회정보 API -> data/raw/*.json
-               parse_nanet.py           국회도서관 발언빅데이터 다운로드 -> 표준 발언 스키마
-               parse_pdf.py             nanet 경로가 안 될 경우의 PDF 회의록 파싱 폴백
-                                         (Day 1 go/no-go 결정 사항)
-               chunk.py                 파싱된 발언을 임베딩용 청크로 분할
-             표준 파싱 발언 형식: {"speaker", "content", "meeting_date",
-             "committee", "source_url"}.
-db/          SQLite 스키마(정형 데이터: 의원/의안/표결), scripts/setup_db.py로 초기화.
-             벡터 저장소는 별도(ChromaDB, rag/chroma_client.py 경유,
-             scripts/setup_chroma.py로 초기화).
+                          통과, output_key="final_answer"). 응답 스키마는 `API.md`의
+                          `/api/query` 응답 형식 참고 — answer/sources 구조를 그대로
+                          pydantic AgentResponse로 구현한 것.
+  tools/            web_search_tool.py(search_news, FunctionTool)만 실제로 쓰인다 —
+                     context_agent가 MCP 없이 직접 import해서 호출.
+mcp_server/  rag/(bigquery_client.py/search_client.py/retriever.py)의 함수를
+             FastMCP 기반 Streamable HTTP MCP 서버로 노출(server.py, transport="http").
+             resolve_legislator/retrieve_speech_evidence/search_votes 툴을 제공하며,
+             speech_agent/action_agent가 MCPToolset(StreamableHTTPConnectionParams,
+             MCP_URL)으로 접속해 호출한다. Private Cloud Run이면 MCP_AUDIENCE로
+             서비스 계정 ID token을 붙인다.
+rag/         search_client.py(Vertex AI Search 시맨틱 검색), bigquery_client.py(검색
+             결과 ID로 BigQuery에서 원문 하이드레이션), retriever.py(member_name/keyword로
+             필터링 가능한 검색 조합).
+pipeline/    1회성/수동 재실행 스크립트(스케줄링 없음)로 BigQuery/Vertex AI Search에
+             데이터를 적재(자세한 실행 순서·옵션은 pipeline/README.md):
+               collect_members.py         열린국회정보 API -> BigQuery mps 테이블
+               collect_assembly.py        회의 메타데이터 + 공식 PDF -> GCS/BigQuery
+                                          (--pdf-only가 운영 경로. HTML 뷰어는 안 씀)
+               rebuild_pdf_tables.py      GCS PDF를 pdftotext -raw로 읽어 pdf_pages/
+                                          utterances 스테이징 테이블 생성
+               normalize_legislators.py   발언에 legislator_id 연결(legislators/
+                                          legislator_terms/speaker_identity_map)
+               build_search_documents.py  utterances -> search_documents(id, jsonData)
+                                          재생성(Vertex AI Search 입력 포맷)
+               validate_search_documents.py  검색 문서 무결성 검증
+               audit_pdf_sources.py       BigQuery 메타데이터 vs GCS PDF 읽기 전용 대조
+             스키마는 pipeline/bigquery_schema.sql, 팀 공유용 인프라 정보는
+             pipeline/BIGQUERY_MCP_HANDOFF.md 참고.
 config.py    레포 전체가 공유하는 단일 Settings(pydantic-settings), 루트의 .env에서
              로드. 환경변수를 직접 읽지 말고 어디서든 `from config import settings`로 사용.
-eval/        qa_dataset.jsonl(질문-정답 쌍) + run_eval.py(Ragas/DeepEval).
+eval/        qa_dataset.jsonl(질문-정답 쌍 + expected_source_types/min_sources/
+             forbidden_phrases 등 결정적 검증 조건) + run_eval.py(DeepEval
+             Faithfulness/AnswerRelevancy/ContextualPrecision·Recall, judge는
+             Vertex AI Gemini로 통일. backend._run_agent_with_diagnostics를
+             그대로 호출해 실제 파이프라인을 채점).
 infra/       CI/CD 전용 Terraform(GitHub push -> Cloud Build -> Cloud Run). 빌드
              트리거/서비스 계정/IAM을 프로비저닝 — 애플리케이션 인프라가 아님.
              Cloud Build의 GitHub 호스트 연결을 콘솔에서 먼저 수동으로 만들어야 함
@@ -148,21 +155,19 @@ session.state 값을 LlmAgent 프롬프트에 넣으려면 `instruction` 문자�
 
 ### 데이터 소스와 신뢰도 등급
 
-외부 데이터 소스 4개, 각각 `config.py`/`.env`에 API 키가 있습니다:
-- **ASSEMBLY_API_KEY** — 열린국회정보 Open API(open.assembly.go.kr): 정형 의안/표결/의원 데이터. 무료 "sample" 키로 최대 10건 테스트 가능.
-- **NANET_API_KEY** — 국회도서관 발언빅데이터(dataset.nanet.go.kr): 1차 출처 발언 원문(가입 필요). 우선 채택 경로 — 이 포맷이 되면 `pipeline/parse_pdf.py` 단계를 완전히 생략 가능.
-- **DATA_GO_KR_API_KEY** — 공공데이터포털 국회사무처 회의록 API: 보조/폴백 정형 소스.
-- **WEB_SEARCH_API_KEY** — 뉴스 검색, 회의록 원문과는 다른 신뢰도 등급의 2차 출처.
+- **ASSEMBLY_API_KEY** — 열린국회정보 Open API(open.assembly.go.kr): 회의 메타데이터·안건, `collect_members.py`의 국회의원 인적사항. 무료 "sample" 키로 최대 10건 테스트 가능.
+- **회의록 원문(1차 출처)** — 국회 공식 회의록 PDF를 `collect_assembly.py --pdf-only`로 GCS에 그대로 보존한 뒤 `rebuild_pdf_tables.py`가 `pdftotext -raw`로 직접 텍스트를 추출한다. HTML 회의록 뷰어나 국회도서관 발언빅데이터(NANET)·공공데이터포털 회의록 API는 검토 후 채택하지 않았다 — 별도 API 키가 필요 없다.
+- **NAVER_CLIENT_ID/SECRET** — NAVER API HUB 뉴스 검색(`agent/tools/web_search_tool.py`), 회의록 원문과는 다른 신뢰도 등급의 2차 출처. Cloud Run이 하이픈 포함 env 이름을 주입하지 않아 헤더명과 다른 이름을 쓴다(config.py 주석 참고).
 
-### MVP 스코프
+### 데이터 수집 스코프
 
-`pipeline/collect_assembly_api.py`에 하드코딩: 22대 국회(`TARGET_ASSEMBLY = 22`), 국토교통위원회 상임위, 소수 대상 의원(`TARGET_MEMBERS`, 현재 빈 리스트 — 파이프라인을 돌리려면 먼저 대상 의원 3~5명을 채워 넣어야 함).
+`pipeline/collect_assembly.py --assembly-no`(기본 22대) 기준으로 연도·기간(`--year`/`--start-date`/`--end-date`)·회의 유형(`--meeting-types`: plenary/committee)을 CLI 옵션으로 지정해 수집한다. 특정 위원회나 의원으로 하드코딩된 제한은 없다 — 얼마나 채울지는 실행할 때 옵션으로 정한다.
 
 ## 팀 역할 분담 (모듈 경계 참고용)
 
 | 담당 | 역할 | 산출물 |
 |---|---|---|
-| A | 인프라/저장 | `db/`, `scripts/setup_*` |
+| A | 인프라/저장 | `infra/`, `pipeline/bigquery_schema.sql` |
 | B | 데이터 전처리 | `pipeline/` |
 | C | 에이전트+툴 | `agent/`, `mcp_server/` |
 | D | RAG 설계+평가 | `rag/`, `eval/` |
@@ -175,24 +180,7 @@ session.state 값을 LlmAgent 프롬프트에 넣으려면 `instruction` 문자�
   + `agent/tools/`, `mcp_server/`
 
 
+## API 입출력 형식
 
-
-
-
-# a2a agent 입력 출력 형식
-  ### 요청
-
-  | 필드 | 타입 | 필수 | 설명 |
-  | --- | --- | --- | --- |
-  | question | string | O | 질문 |
-  | member_name | string | null | X | 의원명 |
-  | keyword | string | null | X | 키워드 |
-
-  ### 응답
-  필드	타입	필수	설명
-  answer	string	O	가드레일 통과한 최종 답변 텍스트
-  sources	array	O	출처 목록. 없으면 빈 배열 (프론트가 섹션째로 숨김)
-  sources[].type	"primary" | "secondary"	O	1차(회의록 원문)/2차(뉴스) 구분 — 이 값으로 배지 색 갈림
-  sources[].title	string	O	출처 제목
-  sources[].url	string | null	X	원문 링크
-  sources[].date	string | null	X	날짜
+`/api/classify`·`/api/query`의 요청/응답 필드는 이 파일에 중복 기재하지 않는다 —
+`API.md`가 실제 pydantic 모델(backend/main.py)과 동기화된 정본이므로 그쪽을 본다.

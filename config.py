@@ -8,12 +8,6 @@ class Settings(BaseSettings):
     # 열린국회정보 Open API
     ASSEMBLY_API_KEY: str = "sample"
 
-    # 국회도서관 발언빅데이터
-    NANET_API_KEY: str = ""
-
-    # 공공데이터포털 국회사무처_회의록 정보 API
-    DATA_GO_KR_API_KEY: str = ""
-
     # GCP / Vertex AI / Gemini / ADK (변수명은 ADK가 그대로 읽는 이름과 맞춤)
     GOOGLE_GENAI_USE_VERTEXAI: bool = True
     GOOGLE_CLOUD_PROJECT: str = ""
@@ -35,9 +29,6 @@ class Settings(BaseSettings):
     NAVER_CLIENT_ID: str = ""
     NAVER_CLIENT_SECRET: str = ""
     WEB_SEARCH_API_KEY: str = ""
-
-    # 저장소
-    SQLITE_PATH: str = "./db/uijeonggirok.sqlite3"
 
     # BigQuery (국회의원/법안/발언 데이터)
     # assembly 데이터셋이 실제로 있는 GCP 프로젝트가 GOOGLE_CLOUD_PROJECT(Vertex AI/Gemini용,

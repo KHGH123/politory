@@ -11,22 +11,20 @@
 ```
 backend/     FastAPI 서버
 agent/       ADK 에이전트, 가드레일 (툴은 mcp_server/ 참고)
-mcp_server/  agent 툴을 MCP 서버로 노출 (C 담당)
-pipeline/    회의록 수집/파싱/청킹 (1회성 스크립트)
-rag/         임베딩/벡터 검색
-eval/        평가셋 + Ragas/DeepEval
-db/          SQLite 스키마
-scripts/     setup/verify 스크립트
+mcp_server/  rag/ 함수를 MCP(HTTP) 서버로 노출 (C 담당)
+pipeline/    회의록 PDF 수집/추출 -> BigQuery/Vertex AI Search 적재 (1회성 스크립트)
+rag/         Vertex AI Search 시맨틱 검색 + BigQuery 원문 하이드레이션
+eval/        평가셋 + DeepEval
+scripts/     Day 1 데이터소스 검증 스크립트
 infra/       Terraform (CI/CD: GitHub push -> Cloud Build -> Cloud Run)
 frontend/    React (Vite)
-docs/        아키텍처/정책 문서
 ```
 
 ## 팀 역할
 
 | 담당 | 역할 | 산출물 |
 |---|---|---|
-| A | 인프라/저장 | `db/`, `scripts/setup_*` |
+| A | 인프라/저장 | `infra/`, `pipeline/bigquery_schema.sql` |
 | B | 데이터 전처리 | `pipeline/` |
 | C | 에이전트+툴 | `agent/` |
 | D | RAG 설계+평가 | `rag/`, `eval/` |
