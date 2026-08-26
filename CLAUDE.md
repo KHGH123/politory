@@ -8,7 +8,7 @@ Politory(의정기록) — 정치인의 특정 정책·사회 이슈에 대한 �
 
 **해결하려는 문제**: 의원의 발의·표결·발언은 의안정보시스템·표결정보시스템·회의록시스템에 각각 흩어져 있어, 특정 의원이 한 이슈에 대해 무엇을 해왔는지 알려면 여러 곳을 수작업으로 엮어야 한다. 특히 표결·의안은 정형 데이터로 제공되지만 **발언은 비정형 회의록에 묻혀 의원 단위 조회가 사실상 불가능**하다.
 
-핵심 제약(`docs/`, PBL 제출 문서 참고):
+핵심 제약(PBL 제출 문서 참고):
 - 검색축은 정책 키워드가 아니라 **인물(의원)** — 키워드는 타임라인을 좁히는 필터일 뿐이다.
 - 같은 의원의 시간차 발언을 병치할 때 **"입장이 바뀌었다" 같은 해석적 판단을 AI가 직접 생성하지 않는다.** 정권 교체·여야 지위·사회적 상황 등 맥락을 근거와 함께 제공하고, 입장 변화가 합리적인지 판단하는 건 어디까지나 사용자 몫이다. `agent/subagent/evidence_synthesis.py`의 `guardrail`이 응답 생성 후 이 위반 여부를 검사한다(실제 해석적 판단 문장을 탐지·제거하는 것까지 테스트로 확인됨). 이와 별개로 `agent/subagent/source_verification.py`는 각 소스의 진술이 실제 도구 결과에 근거하는지(hallucination 여부)를 검사한다 — "해석" 문제와 "사실 근거" 문제는 서로 다른 계층에서 다룬다.
 - 1차 출처(회의록 원문, 법안, 표결)와 2차 출처(뉴스 보도)는 응답에서 **신뢰도를 구분해서 표시**해야 한다.
@@ -32,10 +32,8 @@ docker compose up --build
 # Day 1 데이터소스 검증 (열린국회정보 API 실제 응답 구조 확인)
 python scripts/verify_data_source.py --api-id <API_ID>
 
-# 1회성 데이터 수집 / DB 초기화 (현재 미구현 스텁)
+# 1회성 데이터 수집 (현재 미구현 스텁)
 python -m pipeline.collect_assembly_api
-python scripts/setup_db.py
-python scripts/setup_chroma.py
 
 # 평가 (Ragas/DeepEval, 현재 미구현)
 python -m eval.run_eval
@@ -112,9 +110,9 @@ agent/       ADK(google-adk) 기반 오케스트레이션 + 가드레일.
                      연결 참고. 현재 subagent/sources/의 각 소스 에이전트는
                      tools=[]로 비어 있음.
 mcp_server/  agent/tools/의 함수들을 MCP(stdio)로 노출해 ADK 에이전트가 호출하게 함.
-rag/         chroma_client.py(ChromaDB 컬렉션 접근), embed.py(Vertex AI 텍스트 임베딩,
-             sentence-transformers 대안), retriever.py(member_name/keyword로 필터링
-             가능한 벡터 검색).
+rag/         search_client.py(Vertex AI Search 시맨틱 검색), bigquery_client.py(검색
+             결과 ID로 BigQuery에서 원문 하이드레이션), retriever.py(member_name/keyword로
+             필터링 가능한 검색 조합).
 pipeline/    1회성/수동 재실행 스크립트(스케줄링 없음)로 데이터를 수집·정규화:
                collect_assembly_api.py  열린국회정보 API -> data/raw/*.json
                parse_nanet.py           국회도서관 발언빅데이터 다운로드 -> 표준 발언 스키마
@@ -123,9 +121,6 @@ pipeline/    1회성/수동 재실행 스크립트(스케줄링 없음)로 데�
                chunk.py                 파싱된 발언을 임베딩용 청크로 분할
              표준 파싱 발언 형식: {"speaker", "content", "meeting_date",
              "committee", "source_url"}.
-db/          SQLite 스키마(정형 데이터: 의원/의안/표결), scripts/setup_db.py로 초기화.
-             벡터 저장소는 별도(ChromaDB, rag/chroma_client.py 경유,
-             scripts/setup_chroma.py로 초기화).
 config.py    레포 전체가 공유하는 단일 Settings(pydantic-settings), 루트의 .env에서
              로드. 환경변수를 직접 읽지 말고 어디서든 `from config import settings`로 사용.
 eval/        qa_dataset.jsonl(질문-정답 쌍) + run_eval.py(Ragas/DeepEval).
@@ -162,7 +157,7 @@ session.state 값을 LlmAgent 프롬프트에 넣으려면 `instruction` 문자�
 
 | 담당 | 역할 | 산출물 |
 |---|---|---|
-| A | 인프라/저장 | `db/`, `scripts/setup_*` |
+| A | 인프라/저장 | `infra/`, `pipeline/bigquery_schema.sql` |
 | B | 데이터 전처리 | `pipeline/` |
 | C | 에이전트+툴 | `agent/`, `mcp_server/` |
 | D | RAG 설계+평가 | `rag/`, `eval/` |

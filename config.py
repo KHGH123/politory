@@ -36,9 +36,6 @@ class Settings(BaseSettings):
     NAVER_CLIENT_SECRET: str = ""
     WEB_SEARCH_API_KEY: str = ""
 
-    # 저장소
-    SQLITE_PATH: str = "./db/uijeonggirok.sqlite3"
-
     # BigQuery (국회의원/법안/발언 데이터)
     # assembly 데이터셋이 실제로 있는 GCP 프로젝트가 GOOGLE_CLOUD_PROJECT(Vertex AI/Gemini용,
     # proj-aj11-...)와 다르다(proj-aj04-...) — 팀원마다 GCP 프로젝트가 갈린 상태.
