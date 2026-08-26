@@ -171,10 +171,3 @@ DeepEval 기반 자동 평가(judge: Vertex AI Gemini)로 핵심 지표를 검�
 | 소프트웨어학과 | 최환희 |
 | 사이버보안학과 | 배동준 |
 | 디지털미디어학과 | 안현식 |
-
-| 담당 | 역할 | 산출물 |
-|---|---|---|
-| A | 인프라/저장 | `infra/`, `pipeline/bigquery_schema.sql` |
-| B | 데이터 전처리 | `pipeline/` |
-| C | 에이전트+툴 | `agent/` |
-| D | RAG 설계+평가 | `rag/`, `eval/` |
