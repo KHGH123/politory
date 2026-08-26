@@ -252,6 +252,42 @@ def test_query_returns_profile_answer_and_source(
     )
 
 
+def test_eight_footnotes_match_date_sorted_sources(backend_module):
+    """8개 출처를 정렬한 뒤 각주 번호가 최종 배열 인덱스와 일치한다."""
+    response = backend_module.AgentResponse(
+        answer=" ".join(f"근거{s}⟦s{s}⟧" for s in range(1, 9)),
+        sources=[
+            backend_module.AgentSource(
+                ref_id=f"s{s}",
+                type="primary",
+                title=f"출처{s}",
+                url=f"https://example.test/source-{s}",
+                date=f"2026-01-{9 - s:02d}",
+            )
+            for s in range(1, 9)
+        ],
+    )
+
+    response.sources = sorted(response.sources, key=backend_module._source_sort_key)
+    backend_module._resolve_footnote_numbers(response)
+
+    assert [source.title for source in response.sources] == [
+        "출처8",
+        "출처7",
+        "출처6",
+        "출처5",
+        "출처4",
+        "출처3",
+        "출처2",
+        "출처1",
+    ]
+    assert response.answer == (
+        "근거1[8] 근거2[7] 근거3[6] 근거4[5] "
+        "근거5[4] 근거6[3] 근거7[2] 근거8[1]"
+    )
+    assert all(source.ref_id == "" for source in response.sources)
+
+
 def test_query_allows_question_without_member(client, backend_module, monkeypatch):
     run_agent = AsyncMock(
         return_value=backend_module.AgentResponse(

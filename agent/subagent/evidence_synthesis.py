@@ -147,7 +147,7 @@ merge = Agent(
       라벨을 스스로 붙여라. 나중에 sources 배열에서 몇 번째인지는 신경
       쓰지 않아도 된다 — 이 라벨로만 answer에서 근거를 가리킨다.
     - action_info/speech_info 인용은 type="primary", context_info 인용은
-      type="secondary". answer에 실제로 쓸 근거만 최대 5개.
+      type="secondary". answer에 실제로 쓸 근거만 최대 8개.
     - legislator_id: action_info/speech_info 원문에 값이 있으면 그대로 옮기고,
       없으면 null로 둬라. 이름·정당·문맥만 보고 ID를 추측하지 마라.
     - title: 회의명/법안명/기사 제목.

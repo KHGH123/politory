@@ -13,7 +13,7 @@
     "ground_truth": null,
     "expected_source_types": ["primary"],
     "min_sources": 1,
-    "max_sources": 5,
+    "max_sources": 8,
     "expect_no_evidence": false,
     "forbidden_phrases": ["입장을 바꿨다"]
   }
