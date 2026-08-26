@@ -1,17 +1,158 @@
-# 의정기록
+# Politory(의정기록)
 
-국회의원의 입법·표결·발언 활동을 의원 단위로 엮어 시간순으로 보여주는 RAG 기반 의정활동 조회 서비스. 4일 해커톤 MVP.
+국회의원의 발의·표결·발언을 **인물 단위로 엮어 시간순으로 보여주는** AI 기반 정치 행적 검색 서비스.
+Ajou PBL 2차 Team 프로젝트.
 
-- 검색축은 정책 키워드가 아니라 **인물(의원)**. 키워드는 타임라인을 좁히는 필터일 뿐.
-- 시간차 발언을 병치할 때 "입장이 바뀌었다" 같은 해석적 판단은 생성하지 않는다 (가드레일로 강제).
-- 회의록 원문(1차)과 뉴스 보도(2차)는 신뢰도를 구분해서 표시한다.
+**서비스 바로 써보기**: https://politory-951524423893.us-central1.run.app/
 
-## 구조
+## 왜 만들었나
+
+22대 국회 전반기 2년(2024.05.30 ~ 2026.06.10) 동안 발의된 법안은 18,658건으로, 21대 국회 같은 기간보다 21% 늘었습니다([출처](https://www.hankyung.com/article/2026061236821)). 발의 법안·표결 결과·회의록은 각각 공개돼 있지만 서로 연결되어 있지 않아서, "이 의원이 이 정책에 대해 예전엔 뭐라고 했고 지금은 어떻게 생각할까?"에 답하려면 사람이 여러 시스템(의안정보시스템·표결정보시스템·회의록시스템)을 일일이 뒤져 시간순으로 직접 엮어야 합니다. 특히 표결·의안은 정형 데이터로 제공되지만 **발언은 비정형 회의록에 묻혀 의원 단위 조회가 사실상 불가능**합니다.
+
+- **A씨** — 어떤 정치인의 부동산 정책이 예전 발언과 같은지 알고 싶지만, 보도가 여기저기 흩어져 있어 스스로 시간순으로 엮어봐야 한다.
+- **B씨** — 부동산 정책에 관심이 많지만 어떤 의원이 이 사안을 다루는지 모른다. 정책만 검색해도 관련 의원을 보여주는 서비스가 없다.
+
+Politory는 이 두 질문에 인물 축으로 답합니다.
+
+## 프로젝트 차별점
+
+| | | |
+|---|---|---|
+| **인물 중심 시점별 추적** | **맥락은 제공, 판단은 사용자 몫** | **근거 기반 말과 행동 비교** |
+| 한 사람의 발언을 시간순으로 제시 | AI가 "입장이 바뀌었다"를 판단하지 않고 배경과 근거만 제시 | 발언·법안·표결까지 원문 출처로 대조 |
+
+검색축은 정책 키워드가 아니라 **인물(의원)** — 키워드는 타임라인을 좁히는 필터일 뿐입니다. 1차 출처(회의록 원문·법안·표결)와 2차 출처(뉴스 보도)는 응답에서 신뢰도를 구분해 표시합니다.
+
+## 서비스 동작 흐름
+
+```mermaid
+flowchart LR
+    A["① 사용자 질문<br/>정치인이나 정책에 대해 질문"] --> B["② 키워드/인물 추천<br/>정치인 관련 정책, 또는<br/>정책 관련 정치인을 추천"]
+    B --> C["③ 결과 생성<br/>회의록·표결·뉴스 검색 결과를<br/>요약 + 타임라인으로 생성"]
+    A -. "이미 충분히 구체적인 질문" .-> C
+```
+
+## 시스템 아키텍처
+
+```mermaid
+flowchart LR
+    subgraph aj11["GCP aj11 — 서비스"]
+        FE["Frontend<br/>React + Vite"]
+        BE["Backend<br/>FastAPI"]
+        AG["Agent<br/>Google ADK"]
+    end
+
+    subgraph aj04["GCP aj04 — 데이터"]
+        BQ[("BigQuery")]
+        VS[("Vertex AI Search")]
+    end
+
+    subgraph aj36["GCP aj36 — MCP"]
+        MCP["MCP Server<br/>FastMCP"]
+        SM["Secret Manager"]
+    end
+
+    FE <--> BE
+    BE <--> AG
+    BE --> BQ
+    AG <--> MCP
+    MCP --> BQ
+    MCP --> VS
+    MCP -.-> SM
+
+    GH["GitHub<br/>(main push)"] --> TF["Terraform<br/>(IaC)"] --> CB["Cloud Build"] --> CR["Google Cloud<br/>(자동 배포)"]
+```
+
+팀원마다 GCP 프로젝트가 나뉘어 있습니다 — `aj11`(Vertex AI/Gemini, 서비스 실행), `aj04`(BigQuery/Vertex AI Search 데이터), `aj36`(MCP Server). `config.py`의 `BIGQUERY_PROJECT`가 이 분리를 흡수합니다. CI/CD는 `main` 브랜치 push마다 Terraform(IaC)이 프로비저닝을 확정하고 Cloud Build가 Cloud Run에 자동 배포합니다.
+
+## 멀티 에이전트 구조
+
+`agent/agent.py`의 `root_agent`(SequentialAgent)가 아래 순서로 실행됩니다.
+
+```mermaid
+flowchart TD
+    Q["사용자 질문"] --> C["classify (backend)<br/>질문 충분 여부 판단 · 이름/정책 추출 · 키워드 카드 추천"]
+    C --> QP["query_processing<br/>action / speech / context 필요 여부(T·F) 판단"]
+
+    QP --> FETCH
+
+    subgraph FETCH["fetch — ParallelAgent (3갈래 동시 실행)"]
+        direction LR
+        subgraph SL["speech_loop"]
+            SA["speech_agent<br/>회의록에서 근거 조회"] --> SV{"speech_verifier"}
+            SV -- "근거 불분명 → retry_hint" --> SA
+        end
+        subgraph AL["action_loop"]
+            AA["action_agent<br/>찬반 표결에서 근거 조회"] --> AV{"action_verifier"}
+            AV -- "근거 불분명 → retry_hint" --> AA
+        end
+        subgraph CL["context_loop"]
+            CA["context_agent<br/>네이버 뉴스에서 근거 조회"] --> CV{"context_verifier"}
+            CV -- "근거 불분명 → retry_hint" --> CA
+        end
+    end
+
+    TOOLS["MCP Server Tools<br/>resolve_legislator · search_speeches · search_votes<br/>get_utterances · retrieve_speech_evidence"]
+    FETCH <--> TOOLS
+
+    FETCH --> M["merge<br/>근거 종합 · answer+sources 구조화 · 1차/2차 출처 구분 · ref id 부여"]
+    M --> G["guardrail<br/>해석적 판단 문장 제거 · hallucination 제거 · url 누락 검사 · 악성 스크립트 검사"]
+    G --> R["최종 응답<br/>answer + sources(타임라인)"]
+```
+
+각 소스 루프는 `LoopAgent(max_iterations=2)`로 구성되어, verifier가 "실제 도구 호출 결과에 근거하는지"를 확인하고 통과하면 즉시 종료(`exit_loop`), 근거가 불분명하면(hallucination 의심) 재검색 지시(`retry_hint`)를 남겨 같은 루프를 한 번 더 돕니다. `source_verification`(사실 근거 검사)과 `guardrail`(해석적 판단 검사)은 서로 다른 계층에서 서로 다른 문제를 검사합니다.
+
+## 사용 방법
+
+### 서비스로 바로 쓰기
+
+1. https://politory-951524423893.us-central1.run.app/ 접속
+2. 검색창에 **인물**("이재명 의원 부동산 정책") 또는 **정책**("교통비 완화 정책")을 입력
+3. 질문이 충분히 구체적이지 않으면 추천 카드(관련 키워드 또는 관련 의원)가 뜨고, 선택하면 자동으로 조회가 이어집니다
+4. 결과 화면에서 요약된 답변과, 그 답변이 인용한 회의록·표결(1차)·뉴스(2차) 출처를 시간순 타임라인으로 확인
+
+### 로컬 개발 환경
+
+```bash
+cp .env.example .env
+pip install -r requirements.txt
+uvicorn backend.main:app --reload
+```
+
+프론트엔드:
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Docker로 한 번에:
+
+```bash
+docker compose up --build
+```
+
+API 요청/응답 형식은 [API.md](API.md), 아키텍처와 각 모듈의 세부 동작·트러블슈팅 기록은 [CLAUDE.md](CLAUDE.md)를 참고하세요.
+
+## 데이터 소스
+
+| 데이터 | 수집/검색 방식 |
+|---|---|
+| 열린국회정보 Open API | 국회의원 인적사항, 회의 메타데이터 |
+| 국회 공식 회의록 PDF | GCS에 원문 보존 후 `pdftotext -raw`로 직접 텍스트 추출 |
+| BigQuery | 위 데이터를 정형 테이블로 통합, 화자-의원 매칭(`speaker_identity_map`) |
+| Vertex AI Search | BigQuery 발언/표결 데이터를 색인한 시맨틱 검색 엔진 |
+| 네이버 뉴스 검색 API | 2차 출처(보도) 실시간 조회 |
+
+수집 파이프라인 실행 순서와 옵션은 [pipeline/README.md](pipeline/README.md) 참고.
+
+## 프로젝트 구조
 
 ```
 backend/     FastAPI 서버
 agent/       ADK 에이전트, 가드레일 (툴은 mcp_server/ 참고)
-mcp_server/  rag/ 함수를 MCP(HTTP) 서버로 노출 (C 담당)
+mcp_server/  rag/ 함수를 MCP(HTTP) 서버로 노출
 pipeline/    회의록 PDF 수집/추출 -> BigQuery/Vertex AI Search 적재 (1회성 스크립트)
 rag/         Vertex AI Search 시맨틱 검색 + BigQuery 원문 하이드레이션
 eval/        평가셋 + DeepEval
@@ -20,7 +161,34 @@ infra/       Terraform (CI/CD: GitHub push -> Cloud Build -> Cloud Run)
 frontend/    React (Vite)
 ```
 
-## 팀 역할
+## 검증 결과
+
+DeepEval 기반 자동 평가(judge: Vertex AI Gemini)로 핵심 지표를 검증했습니다.
+
+| 지표 | 목표 | 결과 |
+|---|---|---|
+| 과업 성공률 | 80% 이상 | 85.7% (7종 중 6종) |
+| 응답 지연·안정성 | 평균 120초 이내, 오류율 10% 미만 | 평균 72.88초, 오류율 7.7% |
+| 사실성(Faithfulness) | 0.8 이상 | 1.0 |
+| 관련성(Answer Relevancy) | 0.8 이상 | 1.0 |
+| 안전성(근거 없는 응답 차단) | 100% 통과 | 100% 통과 |
+
+동명이인 식별, 존재하지 않는 의원·프롬프트 인젝션 방어, 발언·표결 통합 검색 등 세부 시나리오 검증은 `eval/qa_dataset.jsonl`과 `python -m eval.run_eval` 결과(`eval/eval_report.json`)로 확인할 수 있습니다.
+
+## 추후 계획
+
+- 용어 설명 챗봇 구현
+- 의원 및 데이터 범위 확대(현재는 22대 국회의원 한정)
+- 자연어 질의 대응 확대(현재는 정책·정치인 입력 중심, 추후 포괄적 질문 처리)
+
+## 팀
+
+| 학과 | 이름 |
+|---|---|
+| 소프트웨어학과 | 이기훈 |
+| 소프트웨어학과 | 최환희 |
+| 사이버보안학과 | 배동준 |
+| 디지털미디어학과 | 안현식 |
 
 | 담당 | 역할 | 산출물 |
 |---|---|---|
@@ -28,48 +196,3 @@ frontend/    React (Vite)
 | B | 데이터 전처리 | `pipeline/` |
 | C | 에이전트+툴 | `agent/` |
 | D | RAG 설계+평가 | `rag/`, `eval/` |
-
-## 실행
-
-```
-cp .env.example .env
-pip install -r requirements.txt
-uvicorn backend.main:app --reload
-```
-
-Docker:
-```
-docker compose up --build
-```
-
-CI/CD (선택, GCP 배포 시): `infra/README.md` 참고.
-
-## Day 1 확인사항
-
-```
-python scripts/verify_data_source.py --api-id <API_ID>
-```
-
-로컬 Eval 평가(배포된 비공개 MCP 사용):
-
-1. `.env`에 MCP 주소를 로컬 프록시 주소로 설정한다. `https`가 아닌 `http`를 사용하고, `MCP_AUDIENCE`는 비워 둔다.
-
-   ```env
-   MCP_URL=http://localhost:8081/mcp
-   MCP_AUDIENCE=
-   ```
-
-2. Cloud Run Invoker 권한이 있는 계정으로 로그인한 뒤, 첫 번째 터미널에서 프록시를 계속 실행한다.
-
-   ```bash
-   gcloud auth login
-   gcloud run services proxy <MCP_SERVICE_NAME> --project=<MCP_PROJECT_ID> --region=<MCP_REGION> --port=8081
-   ```
-
-3. 가상환경을 활성화한 두 번째 터미널에서 평가를 실행한다.
-
-   ```bash
-   python -m eval.run_eval
-   ```
-
-로컬 FastAPI 테스트(가상환경 활성화 후): `python -m pytest tests/test_api.py -v`
