@@ -8,12 +8,6 @@ class Settings(BaseSettings):
     # 열린국회정보 Open API
     ASSEMBLY_API_KEY: str = "sample"
 
-    # 국회도서관 발언빅데이터
-    NANET_API_KEY: str = ""
-
-    # 공공데이터포털 국회사무처_회의록 정보 API
-    DATA_GO_KR_API_KEY: str = ""
-
     # GCP / Vertex AI / Gemini / ADK (변수명은 ADK가 그대로 읽는 이름과 맞춤)
     GOOGLE_GENAI_USE_VERTEXAI: bool = True
     GOOGLE_CLOUD_PROJECT: str = ""
