@@ -25,82 +25,64 @@ Politory는 이 두 질문에 인물 축으로 답합니다.
 
 ## 서비스 동작 흐름
 
-```mermaid
-flowchart LR
-    A["① 사용자 질문<br/>정치인이나 정책에 대해 질문"] --> B["② 키워드/인물 추천<br/>정치인 관련 정책, 또는<br/>정책 관련 정치인을 추천"]
-    B --> C["③ 결과 생성<br/>회의록·표결·뉴스 검색 결과를<br/>요약 + 타임라인으로 생성"]
-    A -. "이미 충분히 구체적인 질문" .-> C
-```
+| 단계 | 이름 | 설명 |
+|---|---|---|
+| ① | 사용자 질문 | 정치인이나 정책에 대해 질문 입력 |
+| ② | 키워드/인물 추천 | 질문이 충분히 구체적이지 않으면, 정치인 관련 정책 또는 정책 관련 정치인을 추천(구체적이면 이 단계는 건너뜀) |
+| ③ | 결과 생성 | 회의록·표결·뉴스 검색 결과를 요약 + 타임라인 형식으로 생성 |
 
 ## 시스템 아키텍처
 
-```mermaid
-flowchart LR
-    subgraph aj11["GCP aj11 — 서비스"]
-        FE["Frontend<br/>React + Vite"]
-        BE["Backend<br/>FastAPI"]
-        AG["Agent<br/>Google ADK"]
-    end
+| 계층 | 구성 | GCP 프로젝트 |
+|---|---|---|
+| Frontend | React + Vite | aj11 |
+| Backend | FastAPI | aj11 |
+| Agent | Google ADK | aj11 |
+| MCP Server | FastMCP | aj36 |
+| Data | BigQuery, Vertex AI Search | aj04 |
+| Secret 관리 | Secret Manager | aj36 |
 
-    subgraph aj04["GCP aj04 — 데이터"]
-        BQ[("BigQuery")]
-        VS[("Vertex AI Search")]
-    end
+| 연결 관계 | 설명 |
+|---|---|
+| Frontend ↔ Backend | 검색창 입력·결과 렌더링 |
+| Backend ↔ Agent | `/api/query`가 root_agent 실행 |
+| Backend → BigQuery | 약력 카드·동명이인/지역구 후보 직접 조회 |
+| Agent ↔ MCP Server | speech_agent/action_agent가 MCPToolset(HTTP)으로 호출 |
+| MCP Server → BigQuery, Vertex AI Search | 발언/표결 원문 조회·시맨틱 검색 |
 
-    subgraph aj36["GCP aj36 — MCP"]
-        MCP["MCP Server<br/>FastMCP"]
-        SM["Secret Manager"]
-    end
+| CI/CD 단계 | 도구 |
+|---|---|
+| 코드 푸시 | GitHub(`main` push) |
+| 인프라 프로비저닝 | Terraform(IaC) |
+| 이미지 빌드 | Cloud Build |
+| 배포 | Cloud Run(자동 배포) |
 
-    FE <--> BE
-    BE <--> AG
-    BE --> BQ
-    AG <--> MCP
-    MCP --> BQ
-    MCP --> VS
-    MCP -.-> SM
-
-    GH["GitHub<br/>(main push)"] --> TF["Terraform<br/>(IaC)"] --> CB["Cloud Build"] --> CR["Google Cloud<br/>(자동 배포)"]
-```
-
-팀원마다 GCP 프로젝트가 나뉘어 있습니다 — `aj11`(Vertex AI/Gemini, 서비스 실행), `aj04`(BigQuery/Vertex AI Search 데이터), `aj36`(MCP Server). `config.py`의 `BIGQUERY_PROJECT`가 이 분리를 흡수합니다. CI/CD는 `main` 브랜치 push마다 Terraform(IaC)이 프로비저닝을 확정하고 Cloud Build가 Cloud Run에 자동 배포합니다.
+팀원마다 GCP 프로젝트가 나뉘어 있습니다 — `aj11`(Vertex AI/Gemini, 서비스 실행), `aj04`(BigQuery/Vertex AI Search 데이터), `aj36`(MCP Server). `config.py`의 `BIGQUERY_PROJECT`가 이 분리를 흡수합니다.
 
 ## 멀티 에이전트 구조
 
-`agent/agent.py`의 `root_agent`(SequentialAgent)가 아래 순서로 실행됩니다.
+`agent/agent.py`의 `root_agent`(SequentialAgent)가 아래 순서로 실행됩니다. `fetch` 단계의 speech/action/context 3갈래는 동시에(ParallelAgent) 실행됩니다.
 
-```mermaid
-flowchart TD
-    Q["사용자 질문"] --> C["classify (backend)<br/>질문 충분 여부 판단 · 이름/정책 추출 · 키워드 카드 추천"]
-    C --> QP["query_processing<br/>action / speech / context 필요 여부(T·F) 판단"]
+| 순서 | 단계 | 역할 |
+|---|---|---|
+| 1 | `classify`(backend) | 질문 충분 여부 판단 · 이름/정책 추출 · 키워드 카드 추천 |
+| 2 | `query_processing` | action/speech/context 필요 여부(T·F) 판단 |
+| 3 | `fetch` → `speech_agent` → `speech_verifier` | 회의록에서 근거 조회 → 근거가 실제 도구 결과에 기반하는지 검증(불분명하면 재검색) |
+| 3 | `fetch` → `action_agent` → `action_verifier` | 찬반 표결에서 근거 조회 → 검증 |
+| 3 | `fetch` → `context_agent` → `context_verifier` | 네이버 뉴스에서 근거 조회 → 검증 |
+| 4 | `merge` | 근거 종합 · answer+sources 구조화 · 1차/2차 출처 구분 · reference id 부여 |
+| 5 | `guardrail` | 해석적 판단 문장 제거 · hallucination 제거 · url 누락 검사 · 악성 스크립트 검사 |
+| 6 | 최종 응답 | answer + sources(타임라인) |
 
-    QP --> FETCH
+각 소스 단계는 `LoopAgent(max_iterations=2)`로 구성되어, verifier가 통과시키면 즉시 종료(`exit_loop`)하고, 근거가 불분명하면(hallucination 의심) 재검색 지시(`retry_hint`)를 남겨 같은 단계를 한 번 더 돕니다. `source_verification`(사실 근거 검사)과 `guardrail`(해석적 판단 검사)은 서로 다른 계층에서 서로 다른 문제를 검사합니다.
 
-    subgraph FETCH["fetch — ParallelAgent (3갈래 동시 실행)"]
-        direction LR
-        subgraph SL["speech_loop"]
-            SA["speech_agent<br/>회의록에서 근거 조회"] --> SV{"speech_verifier"}
-            SV -- "근거 불분명 → retry_hint" --> SA
-        end
-        subgraph AL["action_loop"]
-            AA["action_agent<br/>찬반 표결에서 근거 조회"] --> AV{"action_verifier"}
-            AV -- "근거 불분명 → retry_hint" --> AA
-        end
-        subgraph CL["context_loop"]
-            CA["context_agent<br/>네이버 뉴스에서 근거 조회"] --> CV{"context_verifier"}
-            CV -- "근거 불분명 → retry_hint" --> CA
-        end
-    end
-
-    TOOLS["MCP Server Tools<br/>resolve_legislator · search_speeches · search_votes<br/>get_utterances · retrieve_speech_evidence"]
-    FETCH <--> TOOLS
-
-    FETCH --> M["merge<br/>근거 종합 · answer+sources 구조화 · 1차/2차 출처 구분 · ref id 부여"]
-    M --> G["guardrail<br/>해석적 판단 문장 제거 · hallucination 제거 · url 누락 검사 · 악성 스크립트 검사"]
-    G --> R["최종 응답<br/>answer + sources(타임라인)"]
-```
-
-각 소스 루프는 `LoopAgent(max_iterations=2)`로 구성되어, verifier가 "실제 도구 호출 결과에 근거하는지"를 확인하고 통과하면 즉시 종료(`exit_loop`), 근거가 불분명하면(hallucination 의심) 재검색 지시(`retry_hint`)를 남겨 같은 루프를 한 번 더 돕니다. `source_verification`(사실 근거 검사)과 `guardrail`(해석적 판단 검사)은 서로 다른 계층에서 서로 다른 문제를 검사합니다.
+| MCP Server 툴 | 역할 |
+|---|---|
+| `resolve_legislator` | 의원 이름 → ID·기본정보 조회 |
+| `search_speeches` | Vertex AI Search로 발언 검색 |
+| `search_votes` | 본회의 표결 검색 + 회의록 출처 |
+| `get_utterances` | 발언 ID로 전체 원문 조회 |
+| `retrieve_speech_evidence` | 검색 + 중복·짧은 발언 제거 |
 
 ## 사용 방법
 
