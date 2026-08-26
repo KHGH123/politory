@@ -1,7 +1,7 @@
 import { useState } from 'react'
 
 const SOURCE_LABEL = {
-  primary: '1차 · 회의록 원문',
+  primary: '1차 · 회의록, 법안',
   secondary: '2차 · 뉴스 보도',
 }
 
